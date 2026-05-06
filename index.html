@@ -1069,26 +1069,23 @@ async function refreshToken() {
 }
 
 async function sheetsRequest(fn) {
-  try {
+  const result = await fn();
+  // Check if response itself is a 401 error object from Google
+  if (result && result.error && result.error.code === 401) {
+    showToast('Session refreshing...', 'success');
+    await refreshToken();
     return await fn();
-  } catch(e) {
-    if (e.message && e.message.includes('401')) {
-      // Token expired — refresh and retry once
-      showToast('Session refreshing...', 'success');
-      await refreshToken();
-      return await fn();
-    }
-    throw e;
   }
+  return result;
 }
 
 async function sheetsGet(range) {
   return sheetsRequest(async () => {
     const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}`;
     const res = await fetch(url, { headers: { Authorization: 'Bearer ' + state.accessToken } });
-    if (res.status === 401) throw new Error('401');
-    if (!res.ok) throw new Error('Sheets GET failed: ' + res.status);
-    return res.json();
+    const data = await res.json();
+    if (!res.ok && res.status !== 401) throw new Error('Sheets GET failed: ' + res.status);
+    return data;
   });
 }
 
@@ -1100,9 +1097,9 @@ async function sheetsAppend(range, values) {
       headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ values })
     });
-    if (res.status === 401) throw new Error('401');
-    if (!res.ok) throw new Error('Sheets APPEND failed: ' + res.status);
-    return res.json();
+    const data = await res.json();
+    if (!res.ok && res.status !== 401) throw new Error('Sheets APPEND failed: ' + res.status);
+    return data;
   });
 }
 
@@ -1114,9 +1111,9 @@ async function sheetsUpdate(range, values) {
       headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ values })
     });
-    if (res.status === 401) throw new Error('401');
-    if (!res.ok) throw new Error('Sheets UPDATE failed: ' + res.status);
-    return res.json();
+    const data = await res.json();
+    if (!res.ok && res.status !== 401) throw new Error('Sheets UPDATE failed: ' + res.status);
+    return data;
   });
 }
 
@@ -1128,9 +1125,9 @@ async function sheetsBatchUpdate(requests) {
       headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ requests })
     });
-    if (res.status === 401) throw new Error('401');
-    if (!res.ok) throw new Error('Sheets BATCH UPDATE failed: ' + res.status);
-    return res.json();
+    const data = await res.json();
+    if (!res.ok && res.status !== 401) throw new Error('Sheets BATCH UPDATE failed: ' + res.status);
+    return data;
   });
 }
 
