@@ -1492,85 +1492,46 @@ function initGoogleAuth() {
   // One Tap removed — using token client popup flow instead
 }
 
-function generateCodeVerifier() {
-  const array = new Uint8Array(32);
-  crypto.getRandomValues(array);
-  return btoa(String.fromCharCode(...array)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
-async function generateCodeChallenge(verifier) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(verifier);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-}
-
 async function signInWithOAuth() {
   if (!CONFIG.CLIENT_ID) { showToast('Setup required first', 'error'); return; }
 
-  // Check if we're returning from OAuth redirect
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  if (code) {
-    await handleOAuthCallback(code);
+  // Check if returning from implicit token redirect (hash fragment)
+  const hash = new URLSearchParams(window.location.hash.substring(1));
+  const token = hash.get('access_token');
+  if (token) {
+    await handleTokenCallback(token);
     return;
   }
 
-  // Start PKCE flow — redirect instead of popup (no popup blocker issues)
-  const verifier = generateCodeVerifier();
-  const challenge = await generateCodeChallenge(verifier);
-  sessionStorage.setItem('pkce_verifier', verifier);
-
+  // Use implicit flow — redirects back with token in URL hash, no client secret needed
   const redirectUri = window.location.origin + window.location.pathname;
   const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   authUrl.searchParams.set('client_id', CONFIG.CLIENT_ID);
   authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('response_type', 'token');
   authUrl.searchParams.set('scope', 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file');
-  authUrl.searchParams.set('code_challenge', challenge);
-  authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('prompt', 'select_account');
-  authUrl.searchParams.set('access_type', 'online');
 
   window.location.href = authUrl.toString();
 }
 
-async function handleOAuthCallback(code) {
+async function handleTokenCallback(token) {
   setLoading(true, 'Signing you in...');
   try {
-    const verifier = sessionStorage.getItem('pkce_verifier');
-    const redirectUri = window.location.origin + window.location.pathname;
+    state.accessToken = token;
 
-    // Exchange code for token via a CORS-friendly approach
-    // Since we can't call token endpoint directly from browser without a backend,
-    // use the implicit token approach via GSI token client as fallback
-    // but trigger it automatically without popup by using the code
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code,
-        client_id: CONFIG.CLIENT_ID,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-        code_verifier: verifier
-      })
-    });
-
-    const tokenData = await tokenRes.json();
-    if (tokenData.error) throw new Error(tokenData.error_description || tokenData.error);
-
-    state.accessToken = tokenData.access_token;
-
-    // Decode email from id_token JWT
-    const payload = JSON.parse(atob(tokenData.id_token.split('.')[1]));
-    
-    // Clean URL
+    // Clean URL hash
     window.history.replaceState({}, document.title, window.location.pathname);
-    
-    await signInUser(payload.email, payload.name || payload.email);
+
+    // Get user info
+    const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+      headers: { Authorization: 'Bearer ' + token }
+    });
+    const info = await res.json();
+    if (!info.email) throw new Error('Could not retrieve email from Google');
+    await signInUser(info.email, info.name || info.email);
   } catch(e) {
-    console.error('OAuth callback error:', e);
+    console.error('Token callback error:', e);
     showToast('Sign in failed: ' + e.message, 'error');
     setLoading(false);
   }
@@ -1630,11 +1591,11 @@ function signOut() {
 // INIT
 // ═══════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
-  // Check if returning from OAuth redirect
-  const urlParams = new URLSearchParams(window.location.search);
-  if (urlParams.get('code')) {
+  // Check if returning from OAuth redirect (implicit flow uses hash)
+  const hashParams = new URLSearchParams(window.location.hash.substring(1));
+  if (hashParams.get('access_token')) {
     showScreen('login');
-    await signInWithOAuth();
+    await handleTokenCallback(hashParams.get('access_token'));
   } else {
     initGoogleAuth();
     showScreen('login');
