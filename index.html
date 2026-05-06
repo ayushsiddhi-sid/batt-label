@@ -1123,15 +1123,17 @@ async function ensureSheets() {
 // TASK ASSIGNMENT
 // ═══════════════════════════════════════════════
 async function getOrAssignTask(email) {
-  const data = await sheetsGet(`${SHEETS.TASKS}!A:L`);
+  const data = await sheetsGet(`${SHEETS.TASKS}!A:N`);
   const rows = data.values || [];
   if (rows.length < 2) return null; // no data
 
   // Check if user already has an in-progress task
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
+    console.log(`Row ${i+1}: assigned_to=${r[8]}, status=${r[9]}`);
     if (r[8] === email && r[9] === 'in-progress') {
-      return { rowIndex: i + 1, batteryId: r[0] }; // 1-indexed sheet row
+      console.log('Resuming in-progress task at row', i + 1);
+      return { rowIndex: i + 1, batteryId: r[0] };
     }
   }
 
@@ -1139,8 +1141,8 @@ async function getOrAssignTask(email) {
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
     if (!r[9] || r[9] === 'unassigned') {
-      // Lock it
       const rowNum = i + 1;
+      console.log('Assigning new task at row', rowNum, 'status was:', r[9]);
       await sheetsUpdate(`${SHEETS.TASKS}!I${rowNum}:K${rowNum}`, [[
         email, 'in-progress', new Date().toISOString()
       ]]);
@@ -1151,7 +1153,7 @@ async function getOrAssignTask(email) {
 }
 
 async function submitTask(rowIndex, fields, timeTaken) {
-  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:N${rowIndex}`, [[
+  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:M${rowIndex}`, [[
     fields.label,
     fields.sublabel || '',
     fields.lfp || '',
