@@ -893,6 +893,7 @@
         <div style="display:flex;gap:10px">
           <input type="file" id="input-import" accept=".xlsx,.xls" style="display:none" />
           <button class="btn-secondary" id="btn-import">↑ Import Excel</button>
+          <button class="btn-secondary" id="btn-refresh">↻ Refresh</button>
           <button class="btn-primary" id="btn-export">↓ Export to Excel</button>
         </div>
       </div>
@@ -1098,6 +1099,10 @@ async function ensureSheets() {
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}`;
   const res = await fetch(url, { headers: { Authorization: 'Bearer ' + state.accessToken } });
   const data = await res.json();
+  if (!data.sheets) {
+    console.error('ensureSheets error:', data);
+    throw new Error('Could not access Google Sheet. Make sure the sheet is shared or accessible to this account.');
+  }
   const existingNames = data.sheets.map(s => s.properties.title);
 
   const toCreate = [];
@@ -1547,7 +1552,14 @@ async function signInUser(email, name) {
     return;
   }
 
-  await ensureSheets();
+  try {
+    await ensureSheets();
+  } catch(e) {
+    showToast(e.message, 'error');
+    console.error('ensureSheets failed:', e);
+    signOut();
+    return;
+  }
 
   // Register annotator in sheet on sign-in so they appear in admin immediately
   if (!state.isAdmin) {
@@ -1639,6 +1651,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Admin actions
   document.getElementById('btn-export').addEventListener('click', exportToExcel);
+  document.getElementById('btn-refresh').addEventListener('click', () => loadAdminDashboard());
   document.getElementById('btn-import').addEventListener('click', () => {
     document.getElementById('input-import').click();
   });
