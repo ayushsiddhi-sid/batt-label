@@ -1054,44 +1054,84 @@ function saveConfig() {
 // ═══════════════════════════════════════════════
 // GOOGLE SHEETS API
 // ═══════════════════════════════════════════════
+async function refreshToken() {
+  return new Promise((resolve, reject) => {
+    window._tokenClient.requestAccessToken({ prompt: '' });
+    // Override callback temporarily to capture new token
+    const originalCallback = window._tokenClient.callback;
+    window._tokenClient.callback = async (resp) => {
+      window._tokenClient.callback = originalCallback;
+      if (resp.error) { reject(new Error(resp.error)); return; }
+      state.accessToken = resp.access_token;
+      resolve(resp.access_token);
+    };
+  });
+}
+
+async function sheetsRequest(fn) {
+  try {
+    return await fn();
+  } catch(e) {
+    if (e.message && e.message.includes('401')) {
+      // Token expired — refresh and retry once
+      showToast('Session refreshing...', 'success');
+      await refreshToken();
+      return await fn();
+    }
+    throw e;
+  }
+}
+
 async function sheetsGet(range) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}`;
-  const res = await fetch(url, { headers: { Authorization: 'Bearer ' + state.accessToken } });
-  if (!res.ok) throw new Error('Sheets GET failed: ' + res.status);
-  return res.json();
+  return sheetsRequest(async () => {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}`;
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + state.accessToken } });
+    if (res.status === 401) throw new Error('401');
+    if (!res.ok) throw new Error('Sheets GET failed: ' + res.status);
+    return res.json();
+  });
 }
 
 async function sheetsAppend(range, values) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values })
+  return sheetsRequest(async () => {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values })
+    });
+    if (res.status === 401) throw new Error('401');
+    if (!res.ok) throw new Error('Sheets APPEND failed: ' + res.status);
+    return res.json();
   });
-  if (!res.ok) throw new Error('Sheets APPEND failed: ' + res.status);
-  return res.json();
 }
 
 async function sheetsUpdate(range, values) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
-  const res = await fetch(url, {
-    method: 'PUT',
-    headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values })
+  return sheetsRequest(async () => {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values })
+    });
+    if (res.status === 401) throw new Error('401');
+    if (!res.ok) throw new Error('Sheets UPDATE failed: ' + res.status);
+    return res.json();
   });
-  if (!res.ok) throw new Error('Sheets UPDATE failed: ' + res.status);
-  return res.json();
 }
 
 async function sheetsBatchUpdate(requests) {
-  const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}:batchUpdate`;
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requests })
+  return sheetsRequest(async () => {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}:batchUpdate`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + state.accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests })
+    });
+    if (res.status === 401) throw new Error('401');
+    if (!res.ok) throw new Error('Sheets BATCH UPDATE failed: ' + res.status);
+    return res.json();
   });
-  if (!res.ok) throw new Error('Sheets BATCH UPDATE failed: ' + res.status);
-  return res.json();
 }
 
 // Ensure sheets exist
