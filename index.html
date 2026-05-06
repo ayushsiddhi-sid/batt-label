@@ -705,12 +705,7 @@
           <svg width="18" height="18" viewBox="0 0 18 18"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/><path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
           Continue with Google
         </button>
-        <div class="or-divider">or enter email directly</div>
-        <div class="field-group">
-          <label>Email address</label>
-          <input type="email" id="input-email" placeholder="you@example.com" />
-        </div>
-        <button class="btn-primary" id="btn-email-signin" style="width:100%">Start Annotating →</button>
+        <p style="color:var(--text-dim);font-size:11px;margin-top:16px;font-family:var(--mono);">Sign in with the @es.cloudfactory.com Google account provided to CloudFactory.</p>
       </div>
     </div>
 
@@ -844,6 +839,19 @@
         </div>
 
         <div class="field-group">
+          <label>Evidence URL <span style="color:var(--text-dim);font-size:10px;text-transform:none;letter-spacing:0">(optional — one per line)</span></label>
+          <textarea id="field-evidence-url" placeholder="https://example.com/image1&#10;https://example.com/image2" style="min-height:60px;font-family:var(--mono);font-size:12px;"></textarea>
+        </div>
+
+        <div class="field-group">
+          <label>Text / Logo Visible</label>
+          <label class="checkbox-field" for="field-visible">
+            <input type="checkbox" id="field-visible" />
+            <span class="checkbox-label-text">The battery type text or logo is clearly visible in the image</span>
+          </label>
+        </div>
+
+        <div class="field-group">
           <label>Needs Review</label>
           <label class="checkbox-field" for="field-needs-review">
             <input type="checkbox" id="field-needs-review" />
@@ -853,7 +861,7 @@
 
         <div class="form-actions">
           <button class="btn-primary" id="btn-submit">Submit & Next →</button>
-          <button class="btn-secondary" id="btn-skip">Skip for now</button>
+          <button class="btn-secondary" id="btn-submit-stop">Submit &amp; Stop</button>
           <span class="timer-badge" id="timer-display">00:00</span>
         </div>
       </div>
@@ -865,6 +873,16 @@
         <div class="done-icon">✦</div>
         <h2>All tasks complete</h2>
         <p>You've annotated all assigned tasks. There are no more rows in the queue right now. Check back later or contact your project manager.</p>
+      </div>
+    </div>
+
+    <!-- GOODBYE -->
+    <div class="screen" id="screen-goodbye">
+      <div class="done-card">
+        <div class="done-icon">◎</div>
+        <h2>Session ended</h2>
+        <p>Your last task has been submitted. You've been signed out. Come back anytime to continue annotating.</p>
+        <button class="btn-primary" id="btn-signin-again" style="margin-top:24px;width:100%">Sign back in →</button>
       </div>
     </div>
 
@@ -1091,7 +1109,7 @@ async function ensureSheets() {
     // Add headers
     if (!existingNames.includes(SHEETS.TASKS)) {
       await sheetsUpdate(`${SHEETS.TASKS}!A1`, [[
-        'battery_id', 'label', 'sublabel', 'lfp', 'evidence', 'needs_review',
+        'battery_id', 'label', 'sublabel', 'lfp', 'evidence', 'evidence_url', 'text_logo_visible', 'needs_review',
         'assigned_to', 'status', 'assigned_at', 'submitted_at', 'time_taken_seconds', 'source_sheet'
       ]]);
     }
@@ -1133,21 +1151,38 @@ async function getOrAssignTask(email) {
 }
 
 async function submitTask(rowIndex, fields, timeTaken) {
-  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:K${rowIndex}`, [[
+  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:M${rowIndex}`, [[
     fields.label,
     fields.sublabel || '',
     fields.lfp || '',
     fields.evidence,
+    (() => {
+      if (!fields.evidence_url) return '';
+      const urls = fields.evidence_url.split('\n').map(u => u.trim()).filter(Boolean);
+      if (urls.length === 1) return '=HYPERLINK("' + urls[0] + '","' + urls[0] + '")';
+      return urls.join('\n');
+    })(),
+    fields.text_logo_visible ? 'Yes' : '',
     fields.needs_review ? 'Yes' : '',
     state.user.email,
     'complete',
-    '', // assigned_at stays
+    '',
     new Date().toISOString(),
     timeTaken
   ]]);
 
   // Upsert annotator record
   await updateAnnotatorRecord(state.user.email, timeTaken);
+}
+
+async function registerAnnotatorIfNew(email) {
+  try {
+    const data = await sheetsGet(`${SHEETS.ANNOTATORS}!A:A`);
+    const emails = (data.values || []).slice(1).map(r => r[0]);
+    if (!emails.includes(email)) {
+      await sheetsAppend(`${SHEETS.ANNOTATORS}!A:D`, [[email, 0, 0, new Date().toISOString()]]);
+    }
+  } catch(e) { console.error('registerAnnotatorIfNew error:', e); }
 }
 
 async function updateAnnotatorRecord(email, timeTaken) {
@@ -1206,6 +1241,8 @@ async function loadNextTask() {
     document.getElementById('field-sublabel').value = '';
     document.getElementById('field-lfp').value = '';
     document.getElementById('field-evidence').value = '';
+    document.getElementById('field-evidence-url').value = '';
+    document.getElementById('field-visible').checked = false;
     document.getElementById('field-needs-review').checked = false;
     document.getElementById('lithium-fields').classList.remove('visible');
     document.getElementById('lfp-field').classList.remove('visible');
@@ -1240,7 +1277,7 @@ async function handleSubmit() {
   const evidence = document.getElementById('field-evidence').value.trim();
 
   if (!label) { showToast('Please select a label', 'error'); return; }
-  if (!evidence) { showToast('Evidence is required', 'error'); return; }
+  if (!evidence) { showToast('Evidence text is required before submitting', 'error'); document.getElementById('field-evidence').focus(); return; }
 
   if (label === 'Lithium') {
     const sublabel = document.getElementById('field-sublabel').value;
@@ -1259,6 +1296,8 @@ async function handleSubmit() {
       sublabel: document.getElementById('field-sublabel').value,
       lfp: document.getElementById('field-lfp').value,
       evidence,
+      evidence_url: document.getElementById('field-evidence-url').value.trim(),
+      text_logo_visible: document.getElementById('field-visible').checked,
       needs_review: document.getElementById('field-needs-review').checked
     }, timeTaken);
 
@@ -1271,15 +1310,48 @@ async function handleSubmit() {
   setLoading(false);
 }
 
-// Skip — release the lock, move to next
-async function handleSkip() {
-  if (!state.currentTask) return;
-  stopTimer();
-  setLoading(true, 'Skipping...');
+// Submit & Stop — submit current task then sign out
+async function handleSubmitAndStop() {
+  const label = document.getElementById('field-label').value;
+  const evidence = document.getElementById('field-evidence').value.trim();
+
+  if (!label) { showToast('Please select a label before stopping', 'error'); return; }
+  if (!evidence) { showToast('Evidence text is required before submitting', 'error'); document.getElementById('field-evidence').focus(); return; }
+
+  if (label === 'Lithium') {
+    const sublabel = document.getElementById('field-sublabel').value;
+    if (!sublabel) { showToast('Please select a Lithium sub-label', 'error'); return; }
+    if ((sublabel === 'Li-ion' || sublabel === 'Solid-state') && !document.getElementById('field-lfp').value) {
+      showToast('Please select an LFP value', 'error'); return;
+    }
+  }
+
+  const timeTaken = stopTimer();
+  setLoading(true, 'Submitting and signing out...');
   try {
-    await sheetsUpdate(`${SHEETS.TASKS}!G${state.currentTask.rowIndex}:I${state.currentTask.rowIndex}`, [['', 'unassigned', '']]);
-    await loadNextTask();
-  } catch(e) { showToast('Error: ' + e.message, 'error'); }
+    await submitTask(state.currentTask.rowIndex, {
+      label,
+      sublabel: document.getElementById('field-sublabel').value,
+      lfp: document.getElementById('field-lfp').value,
+      evidence,
+      evidence_url: document.getElementById('field-evidence-url').value.trim(),
+      text_logo_visible: document.getElementById('field-visible').checked,
+      needs_review: document.getElementById('field-needs-review').checked
+    }, timeTaken);
+
+    // Clear session
+    state.user = null;
+    state.accessToken = null;
+    state.currentTask = null;
+    document.getElementById('header-email').style.display = 'none';
+    document.getElementById('btn-logout').style.display = 'none';
+    document.getElementById('btn-admin-toggle').style.display = 'none';
+
+    showScreen('goodbye');
+  } catch(e) {
+    showToast('Error: ' + e.message, 'error');
+    console.error(e);
+  }
   setLoading(false);
 }
 
@@ -1391,7 +1463,7 @@ async function importExcel(file) {
       for (let i = 1; i < rows.length; i++) {
         const batteryId = rows[i][0];
         if (batteryId && String(batteryId).trim()) {
-          allRows.push([String(batteryId).trim(), '', '', '', '', '', '', 'unassigned', '', '', '', sheetName]);
+          allRows.push([String(batteryId).trim(), '', '', '', '', '', '', '', '', 'unassigned', '', '', '', sheetName]);
         }
       }
     }
@@ -1399,9 +1471,9 @@ async function importExcel(file) {
     if (allRows.length === 0) { showToast('No data rows found', 'error'); setLoading(false); return; }
 
     // Write header + all rows
-    const header = [['battery_id','label','sublabel','lfp','evidence','needs_review','assigned_to','status','assigned_at','submitted_at','time_taken_seconds','source_sheet']];
+    const header = [['battery_id','label','sublabel','lfp','evidence','evidence_url','text_logo_visible','needs_review','assigned_to','status','assigned_at','submitted_at','time_taken_seconds','source_sheet']];
     await sheetsUpdate(`${SHEETS.TASKS}!A1`, header);
-    await sheetsAppend(`${SHEETS.TASKS}!A:L`, allRows);
+    await sheetsAppend(`${SHEETS.TASKS}!A:N`, allRows);
     showToast(`Imported ${allRows.length} rows from ${wb.SheetNames.length - skip.length} sheets`);
     await loadAdminDashboard();
   } catch(e) {
@@ -1475,6 +1547,11 @@ async function signInUser(email, name) {
 
   await ensureSheets();
 
+  // Register annotator in sheet on sign-in so they appear in admin immediately
+  if (!state.isAdmin) {
+    await registerAnnotatorIfNew(email);
+  }
+
   if (state.isAdmin) {
     await loadAdminDashboard();
     showScreen('admin');
@@ -1524,11 +1601,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Login
   document.getElementById('btn-google-signin').addEventListener('click', signInWithOAuth);
-  document.getElementById('btn-email-signin').addEventListener('click', () => {
-    const email = document.getElementById('input-email').value.trim();
-    if (!email || !email.includes('@')) { showToast('Please enter a valid email', 'error'); return; }
-    signInWithOAuth(); // Still need OAuth for Sheets access
-  });
 
   // Logout
   document.getElementById('btn-logout').addEventListener('click', signOut);
@@ -1562,9 +1634,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!showLFP) document.getElementById('field-lfp').value = '';
   });
 
-  // Submit / skip
+  // Submit / submit & stop
   document.getElementById('btn-submit').addEventListener('click', handleSubmit);
-  document.getElementById('btn-skip').addEventListener('click', handleSkip);
+  document.getElementById('btn-submit-stop').addEventListener('click', handleSubmitAndStop);
+  document.getElementById('btn-signin-again').addEventListener('click', () => { showScreen('login'); });
 
   // Admin actions
   document.getElementById('btn-export').addEventListener('click', exportToExcel);
