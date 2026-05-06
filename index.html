@@ -1130,7 +1130,7 @@ async function getOrAssignTask(email) {
   // Check if user already has an in-progress task
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (r[6] === email && r[7] === 'in-progress') {
+    if (r[8] === email && r[9] === 'in-progress') {
       return { rowIndex: i + 1, batteryId: r[0] }; // 1-indexed sheet row
     }
   }
@@ -1138,10 +1138,10 @@ async function getOrAssignTask(email) {
   // Find next unassigned row
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (!r[7] || r[7] === 'unassigned') {
+    if (!r[9] || r[9] === 'unassigned') {
       // Lock it
       const rowNum = i + 1;
-      await sheetsUpdate(`${SHEETS.TASKS}!G${rowNum}:I${rowNum}`, [[
+      await sheetsUpdate(`${SHEETS.TASKS}!I${rowNum}:K${rowNum}`, [[
         email, 'in-progress', new Date().toISOString()
       ]]);
       return { rowIndex: rowNum, batteryId: r[0] };
@@ -1151,7 +1151,7 @@ async function getOrAssignTask(email) {
 }
 
 async function submitTask(rowIndex, fields, timeTaken) {
-  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:M${rowIndex}`, [[
+  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:N${rowIndex}`, [[
     fields.label,
     fields.sublabel || '',
     fields.lfp || '',
@@ -1261,7 +1261,7 @@ async function loadNextTask() {
 
 async function updateUserProgress() {
   try {
-    const data = await sheetsGet(`${SHEETS.TASKS}!G:H`);
+    const data = await sheetsGet(`${SHEETS.TASKS}!I:J`);
     const rows = (data.values || []).slice(1);
     const mine = rows.filter(r => r[0] === state.user.email);
     const done = mine.filter(r => r[1] === 'complete').length;
@@ -1370,9 +1370,9 @@ async function loadAdminDashboard() {
     const annotators = (annotatorsData.values || []).slice(1);
 
     const total = tasks.length;
-    const completed = tasks.filter(r => r[7] === 'complete').length;
-    const inprogress = tasks.filter(r => r[7] === 'in-progress').length;
-    const needsReview = tasks.filter(r => r[5] === 'Yes').length;
+    const completed = tasks.filter(r => r[9] === 'complete').length;
+    const inprogress = tasks.filter(r => r[9] === 'in-progress').length;
+    const needsReview = tasks.filter(r => r[7] === 'Yes').length;
     const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
     document.getElementById('stat-total').textContent = total.toLocaleString();
@@ -1406,7 +1406,7 @@ async function loadAdminDashboard() {
     }
 
     // Recent completions
-    const recent = tasks.filter(r => r[7] === 'complete').slice(-20).reverse();
+    const recent = tasks.filter(r => r[9] === 'complete').slice(-20).reverse();
     const rtbody = document.getElementById('recent-tbody');
     if (recent.length === 0) {
       rtbody.innerHTML = '<tr><td colspan="7" style="color:var(--text-dim);text-align:center;padding:24px;">No completions yet</td></tr>';
@@ -1416,9 +1416,9 @@ async function loadAdminDashboard() {
         <td>${r[1] || '—'}</td>
         <td>${r[2] || '—'}</td>
         <td>${r[3] || '—'}</td>
-        <td>${r[5] === 'Yes' ? '<span class="badge badge-yellow">Yes</span>' : '<span class="badge badge-gray">No</span>'}</td>
-        <td style="font-size:12px;color:var(--text-muted)">${r[6] || '—'}</td>
-        <td style="font-family:var(--mono);font-size:12px">${formatSeconds(parseInt(r[10]))}</td>
+        <td>${r[7] === 'Yes' ? '<span class="badge badge-yellow">Yes</span>' : '<span class="badge badge-gray">No</span>'}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${r[8] || '—'}</td>
+        <td style="font-family:var(--mono);font-size:12px">${formatSeconds(parseInt(r[12]))}</td>
       </tr>`).join('');
     }
 
