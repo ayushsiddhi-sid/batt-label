@@ -1504,21 +1504,40 @@ function handleGoogleCredential(response) {
 
 async function signInWithOAuth() {
   if (!CONFIG.CLIENT_ID) { showToast('Setup required first', 'error'); return; }
-  const client = google.accounts.oauth2.initTokenClient({
+
+  // Use Sign In With Google (id_token) to get email reliably, then get access token for Sheets
+  google.accounts.id.initialize({
     client_id: CONFIG.CLIENT_ID,
-    scope: CONFIG.SCOPES,
-    callback: async (resp) => {
-      if (resp.error) { showToast('Auth error: ' + resp.error, 'error'); return; }
-      state.accessToken = resp.access_token;
-      // Get user info
-      const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { Authorization: 'Bearer ' + resp.access_token }
+    callback: async (credentialResponse) => {
+      // Decode email from JWT id_token — no extra API call needed
+      const payload = JSON.parse(atob(credentialResponse.credential.split('.')[1]));
+      const email = payload.email;
+      const name = payload.name || email;
+
+      // Now get an access token for Sheets API
+      const tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CONFIG.CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+        hint: email,
+        callback: async (resp) => {
+          if (resp.error) { showToast('Auth error: ' + resp.error, 'error'); return; }
+          state.accessToken = resp.access_token;
+          await signInUser(email, name);
+        }
       });
-      const info = await res.json();
-      await signInUser(info.email, info.name);
+      tokenClient.requestAccessToken({ prompt: '' });
     }
   });
-  client.requestAccessToken();
+
+  google.accounts.id.prompt((notification) => {
+    if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+      // Fallback: show Google One Tap didn't show, use button flow
+      google.accounts.id.renderButton(
+        document.getElementById('btn-google-signin').parentElement,
+        { theme: 'outline', size: 'large', width: 340 }
+      );
+    }
+  });
 }
 
 async function signInWithEmail(email) {
@@ -1600,7 +1619,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Login
-  document.getElementById('btn-google-signin').addEventListener('click', signInWithOAuth);
+  document.getElementById('btn-google-signin').addEventListener('click', () => {
+    signInWithOAuth();
+  });
 
   // Logout
   document.getElementById('btn-logout').addEventListener('click', signOut);
