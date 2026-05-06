@@ -984,8 +984,7 @@
 // ═══════════════════════════════════════════════
 // CONFIG — loaded from localStorage after setup
 // ═══════════════════════════════════════════════
-// v2.1
-  let CONFIG = {
+let CONFIG = {
   CLIENT_ID: '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com',
   SHEET_ID: '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
   ADMIN_EMAILS: ['ayush.siddhi@cloudfactory.com'],
@@ -1490,52 +1489,38 @@ async function importExcel(file) {
 // AUTH
 // ═══════════════════════════════════════════════
 function initGoogleAuth() {
-  // One Tap removed — using token client popup flow instead
+  initTokenClient();
 }
 
 async function signInWithOAuth() {
-  if (!CONFIG.CLIENT_ID) { showToast('Setup required first', 'error'); return; }
-
-  // Check if returning from implicit token redirect (hash fragment)
-  const hash = new URLSearchParams(window.location.hash.substring(1));
-  const token = hash.get('access_token');
-  if (token) {
-    await handleTokenCallback(token);
-    return;
-  }
-
-  // Use implicit flow — redirects back with token in URL hash, no client secret needed
-  const redirectUri = window.location.origin + window.location.pathname;
-  const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  authUrl.searchParams.set('client_id', CONFIG.CLIENT_ID);
-  authUrl.searchParams.set('redirect_uri', redirectUri);
-  authUrl.searchParams.set('response_type', 'token');
-  authUrl.searchParams.set('scope', 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file');
-  authUrl.searchParams.set('prompt', 'select_account');
-
-  window.location.href = authUrl.toString();
+  // Trigger the token client directly — this is the correct modern approach
+  // The button click handler calls this, which opens Google's account picker
+  window._tokenClient.requestAccessToken({ prompt: 'select_account' });
 }
 
-async function handleTokenCallback(token) {
-  setLoading(true, 'Signing you in...');
-  try {
-    state.accessToken = token;
-
-    // Clean URL hash
-    window.history.replaceState({}, document.title, window.location.pathname);
-
-    // Get user info
-    const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
-      headers: { Authorization: 'Bearer ' + token }
-    });
-    const info = await res.json();
-    if (!info.email) throw new Error('Could not retrieve email from Google');
-    await signInUser(info.email, info.name || info.email);
-  } catch(e) {
-    console.error('Token callback error:', e);
-    showToast('Sign in failed: ' + e.message, 'error');
-    setLoading(false);
-  }
+function initTokenClient() {
+  window._tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.CLIENT_ID,
+    scope: 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file',
+    callback: async (resp) => {
+      if (resp.error) {
+        showToast('Sign in error: ' + resp.error, 'error');
+        return;
+      }
+      state.accessToken = resp.access_token;
+      try {
+        const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+          headers: { Authorization: 'Bearer ' + resp.access_token }
+        });
+        const info = await res.json();
+        if (!info.email) throw new Error('No email returned');
+        await signInUser(info.email, info.name || info.email);
+      } catch(e) {
+        console.error('Userinfo error:', e);
+        showToast('Could not get user info — please try again', 'error');
+      }
+    }
+  });
 }
 
 async function signInWithEmail(email) {
@@ -1592,15 +1577,8 @@ function signOut() {
 // INIT
 // ═══════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
-  // Check if returning from OAuth redirect (implicit flow uses hash)
-  const hashParams = new URLSearchParams(window.location.hash.substring(1));
-  if (hashParams.get('access_token')) {
-    showScreen('login');
-    await handleTokenCallback(hashParams.get('access_token'));
-  } else {
-    initGoogleAuth();
-    showScreen('login');
-  }
+  initGoogleAuth();
+  showScreen('login');
 
   // Setup save
   document.getElementById('btn-save-setup').addEventListener('click', () => {
