@@ -338,7 +338,7 @@
 
     <!-- RESULTS -->
     <div class="screen" id="screen-results">
-      <div class="results-wrap">
+      <div class="results-wrap" style="max-width:520px;margin:0 auto;padding-top:60px">
         <div class="score-hero">
           <div class="score-tag">Assessment Complete</div>
           <div class="score-number" id="score-display">0<span>/100</span></div>
@@ -348,7 +348,7 @@
           </div>
         </div>
 
-        <div class="results-grid">
+        <div class="results-grid" style="grid-template-columns:repeat(3,1fr)">
           <div class="result-stat">
             <div class="rs-label">Correct</div>
             <div class="rs-value green" id="stat-correct">0</div>
@@ -363,22 +363,8 @@
           </div>
         </div>
 
-        <div class="section-title">Task Breakdown</div>
-        <div class="breakdown-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Battery ID</th>
-                <th>Your Label</th>
-                <th>Correct Label</th>
-                <th>Sub-Label</th>
-                <th>LFP</th>
-                <th>Points</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody id="breakdown-tbody"></tbody>
-          </table>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:20px;text-align:center;margin-top:16px">
+          <p style="color:var(--text-muted);font-size:13px;line-height:1.7">Your results have been recorded. Your project manager will be in touch with feedback. You may now close this window.</p>
         </div>
       </div>
     </div>
@@ -733,6 +719,7 @@ async function submitAssessment() {
 
   try {
     // Write all responses to sheet
+    console.log('Writing', scored.length, 'response rows to sheet...');
     const responseRows = scored.map(s => [
       state.user.email,
       s.batteryId,
@@ -749,10 +736,10 @@ async function submitAssessment() {
       s.points,
       s.max
     ]);
-    await sheetsAppend(`${SHEETS.RESPONSES}!A:N`, responseRows);
+    const appendRes = await sheetsAppend(`${SHEETS.RESPONSES}!A:N`, responseRows);
+    console.log('Responses append result:', JSON.stringify(appendRes));
 
-    // Write summary to annotators sheet
-    await sheetsAppend(`${SHEETS.ANNOTATORS}!A:H`, [[
+    const summaryRes = await sheetsAppend(`${SHEETS.ANNOTATORS}!A:H`, [[
       state.user.email,
       finalScore,
       correct,
@@ -762,8 +749,13 @@ async function submitAssessment() {
       new Date().toISOString(),
       'complete'
     ]]);
+    console.log('Summary append result:', JSON.stringify(summaryRes));
 
-    showResults(finalScore, correct, partial, incorrect, scored);
+    if (appendRes.error || summaryRes.error) {
+      throw new Error(appendRes.error?.message || summaryRes.error?.message || 'Sheet write failed');
+    }
+
+    showResults(finalScore, correct, partial, incorrect);
   } catch(e) {
     showToast('Error saving results: ' + e.message, 'error');
     console.error(e);
@@ -771,7 +763,7 @@ async function submitAssessment() {
   setLoading(false);
 }
 
-function showResults(score, correct, partial, incorrect, scored) {
+function showResults(score, correct, partial, incorrect) {
   showScreen('results');
 
   document.getElementById('score-display').innerHTML = `${score}<span>/100</span>`;
@@ -788,34 +780,6 @@ function showResults(score, correct, partial, incorrect, scored) {
   document.getElementById('stat-correct').textContent = correct;
   document.getElementById('stat-partial').textContent = partial;
   document.getElementById('stat-incorrect').textContent = incorrect;
-
-  // Breakdown table
-  const tbody = document.getElementById('breakdown-tbody');
-  tbody.innerHTML = scored.map(s => {
-    const resultBadge = s.result === 'correct'
-      ? '<span class="badge badge-green">Correct</span>'
-      : s.result === 'partial'
-      ? '<span class="badge badge-yellow">Partial</span>'
-      : '<span class="badge badge-red">Incorrect</span>';
-
-    const sublabelCell = s.truth.label === 'Lithium'
-      ? `<td>${s.sublabel || '—'} ${s.sublabelCorrect ? '✓' : s.sublabelCorrect === false ? '✗' : ''}</td>`
-      : '<td style="color:var(--text-dim)">N/A</td>';
-
-    const lfpCell = (s.truth.label === 'Lithium' && (s.truth.sublabel === 'Li-ion' || s.truth.sublabel === 'Solid-state'))
-      ? `<td>${s.lfp || '—'} ${s.lfpCorrect ? '✓' : s.lfpCorrect === false ? '✗' : ''}</td>`
-      : '<td style="color:var(--text-dim)">N/A</td>';
-
-    return `<tr>
-      <td style="font-family:var(--mono);font-size:11px">${s.batteryId}</td>
-      <td>${s.label} ${s.labelCorrect ? '✓' : '✗'}</td>
-      <td style="color:var(--text-muted)">${s.truth.label}</td>
-      ${sublabelCell}
-      ${lfpCell}
-      <td class="pts-cell" style="color:${s.points === s.max ? 'var(--green)' : s.points > 0 ? 'var(--warn)' : 'var(--red)'}">${s.points}/${s.max}</td>
-      <td>${resultBadge}</td>
-    </tr>`;
-  }).join('');
 }
 
 // ═══════════════════════════════════════════════
