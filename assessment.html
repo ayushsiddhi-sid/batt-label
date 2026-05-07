@@ -843,7 +843,7 @@ function buildEmailBody(email, score, correct, partial, incorrect, responseRows)
   const firstName = email.split('.')[0];
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
-  // Build per-task breakdown
+  // Build per-task breakdown with correct answers
   let breakdown = '';
   if (responseRows && responseRows.length > 0) {
     breakdown = `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -851,22 +851,37 @@ TASK BREAKDOWN
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 `;
     responseRows.forEach((r, i) => {
-      const batteryId  = r[1] || '—';
-      const yourLabel  = r[2] || '—';
-      const yourSub    = r[3] || '';
-      const yourLfp    = r[4] || '';
-      const corrLabel  = r[9]  === 'Yes' ? '✓' : '✗';
-      const corrSub    = r[10] === 'N/A' ? '' : r[10] === 'Yes' ? '✓' : '✗';
-      const corrLfp    = r[11] === 'N/A' ? '' : r[11] === 'Yes' ? '✓' : '✗';
-      const pts        = r[12] || '0';
-      const max        = r[13] || '100';
+      const batteryId   = r[1] || '—';
+      const yourLabel   = r[2] || '—';
+      const yourSub     = r[3] || '';
+      const yourLfp     = r[4] || '';
+      const labelOk     = r[9]  === 'Yes';
+      const sublabelOk  = r[10] === 'Yes';
+      const lfpOk       = r[11] === 'Yes';
+      const sublabelNA  = r[10] === 'N/A';
+      const lfpNA       = r[11] === 'N/A';
+      const pts         = r[12] || '0';
+      const max         = r[13] || '100';
 
-      const yourAnswer = [yourLabel, yourSub, yourLfp].filter(Boolean).join(' › ');
-      const result     = parseInt(pts) === parseInt(max) ? 'CORRECT' : parseInt(pts) > 0 ? 'PARTIAL' : 'INCORRECT';
+      // Look up correct answer from GROUND_TRUTH
+      const truth = GROUND_TRUTH.find(t => t.id === batteryId) || {};
+      const corrLabel  = truth.label  || '—';
+      const corrSub    = truth.sublabel || '';
+      const corrLfp    = truth.lfp     || '';
+
+      const yourAnswer    = [yourLabel, yourSub, yourLfp].filter(Boolean).join(' › ');
+      const correctAnswer = [corrLabel, corrSub, corrLfp].filter(Boolean).join(' › ');
+      const result        = parseInt(pts) === parseInt(max) ? 'CORRECT' : parseInt(pts) > 0 ? 'PARTIAL' : 'INCORRECT';
+
+      // Per-component check marks
+      let checks = `Label : ${labelOk ? '✓' : '✗'}`;
+      if (!sublabelNA) checks += `  Sub-label : ${sublabelOk ? '✓' : '✗'}`;
+      if (!lfpNA)      checks += `  LFP : ${lfpOk ? '✓' : '✗'}`;
 
       breakdown += `\nTask ${String(i+1).padStart(2,'0')} | ${batteryId}
   Your answer : ${yourAnswer}
-  Label       : ${corrLabel}${corrSub ? '  Sub-label : ' + corrSub : ''}${corrLfp ? '  LFP : ' + corrLfp : ''}
+  Correct     : ${correctAnswer}
+  ${checks}
   Points      : ${pts}/${max} (${result})
 `;
     });
