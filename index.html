@@ -833,9 +833,36 @@
 
         <div class="form-divider"></div>
 
+
         <div class="field-group">
-          <label>Evidence *</label>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+            <label style="margin-bottom:0">Evidence *</label>
+            <select id="template-select" style="background:var(--surface2);border:1px solid var(--border-bright);border-radius:4px;color:var(--text-muted);font-size:11px;padding:3px 8px;font-family:var(--mono);cursor:pointer;max-width:260px;">
+              <option value="">+ Insert template...</option>
+              <optgroup label="── Direct evidence ──">
+                <option value="The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.">1. Text visible</option>
+                <option value="The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.">2. Logo visible</option>
+                <option value="[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. [url]">3. Voltage / mAh indicator</option>
+              </optgroup>
+              <optgroup label="── Web search ──">
+                <option value="[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. [url]">4. Web search — chemistry clear</option>
+                <option value="[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.">5. Web search — chemistry unclear</option>
+              </optgroup>
+              <optgroup label="── Multiple batteries ──">
+                <option value="Multiple batteries in image. [chemistry] text visible on [n] of [total] batteries in [cam].jpg.">6. Multiple batteries — chemistry clear</option>
+                <option value="Multiple batteries visible in image with different compositions: [chemistry 1] and [chemistry 2]. Cannot confirm single label — marked for review.">7. Multiple batteries — different chemistry</option>
+                <option value="Multiple batteries visible in image all identified to be [chemistry].">8. Multiple batteries — same chemistry</option>
+              </optgroup>
+              <optgroup label="── Unknown / errors ──">
+                <option value="Unable to confirm battery type. [label obscured / distorted image / no visible markings].">9. Unknown / cannot confirm</option>
+                <option value="Data error — non-battery item in image. Marked as data error.">10. Data error — non-battery item</option>
+                <option value="Data error — product missing in [cam].jpg. Marked as data error.">11. Data error — product missing</option>
+                <option value="Data error — product in [cam] differs from other images in dataset. Marked as data error.">12. Data error — product mismatch</option>
+              </optgroup>
+            </select>
+          </div>
           <textarea id="field-evidence" placeholder="Describe the evidence supporting your label. Include camera references where applicable (e.g. 'Li-ion text visible on Cam 2, 3')."></textarea>
+          <div id="template-hint" style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-top:4px;display:none;">↳ Replace text in [ ] with specific details</div>
         </div>
 
         <div class="field-group">
@@ -1550,6 +1577,27 @@ function initTokenClient() {
         return;
       }
       state.accessToken = resp.access_token;
+
+      // Schedule silent token refresh every 45 minutes
+      clearInterval(window._tokenRefreshInterval);
+      window._tokenRefreshInterval = setInterval(async () => {
+        try {
+          await new Promise((resolve, reject) => {
+            const orig = window._tokenClient.callback;
+            window._tokenClient.callback = (r) => {
+              window._tokenClient.callback = orig;
+              if (r.error) reject(new Error(r.error));
+              else { state.accessToken = r.access_token; resolve(); }
+            };
+            window._tokenClient.requestAccessToken({ prompt: '' });
+          });
+          console.log('Token silently refreshed');
+        } catch(e) { console.warn('Silent refresh failed:', e); }
+      }, 45 * 60 * 1000);
+
+      // If already signed in (token refresh), skip sign-in flow
+      if (state.user) return;
+
       try {
         const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
           headers: { Authorization: 'Bearer ' + resp.access_token }
@@ -1622,6 +1670,48 @@ function signOut() {
   showScreen('login');
 }
 
+
+const EVIDENCE_TEMPLATES = [
+  { group: 'Direct evidence', label: 'Text visible', text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
+  { group: 'Direct evidence', label: 'Logo visible', text: 'The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.' },
+  { group: 'Direct evidence', label: 'Voltage / mAh indicator', text: '[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. [url]' },
+  { group: 'Web search', label: 'Web search — chemistry clear', text: '[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. [url]' },
+  { group: 'Web search', label: 'Web search — chemistry unclear', text: '[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.' },
+  { group: 'Multiple batteries', label: 'Multiple batteries — chemistry clear', text: 'Multiple batteries in image. [chemistry] text visible on [n] of [total] batteries in [cam].jpg.' },
+  { group: 'Multiple batteries', label: 'Multiple batteries — different chemistry', text: 'Multiple batteries visible in image with different compositions: [chemistry 1] and [chemistry 2]. Cannot confirm single label — marked for review.' },
+  { group: 'Multiple batteries', label: 'Multiple batteries — same chemistry', text: 'Multiple batteries visible in image identified to be [chemistry].' },
+  { group: 'Unknown', label: 'Unknown / cannot confirm', text: 'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
+  { group: 'Data error', label: 'Data error — non-battery item', text: 'Data error — non-battery item in image. Marked as data error.' },
+  { group: 'Data error', label: 'Data error — product missing', text: 'Data error — product missing in [cam].jpg. Marked as data error.' },
+  { group: 'Data error', label: 'Data error — different product', text: 'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
+];
+
+function buildTemplateHTML() {
+  const groups = [...new Set(EVIDENCE_TEMPLATES.map(t => t.group))];
+  let html = '<option value="">+ Insert template...</option>';
+  groups.forEach(g => {
+    html += `<optgroup label="${g}">`;
+    EVIDENCE_TEMPLATES.filter(t => t.group === g).forEach(t => {
+      html += `<option value="${t.text.replace(/"/g, '&quot;')}">${t.label}</option>`;
+    });
+    html += '</optgroup>';
+  });
+  return html;
+}
+
+function attachTemplateDropdown(selectId, textareaId) {
+  const sel = document.getElementById(selectId);
+  const box = document.getElementById(textareaId);
+  if (!sel || !box) return;
+  sel.innerHTML = buildTemplateHTML();
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    box.value = sel.value;
+    box.focus();
+    sel.value = '';
+  });
+}
+
 // ═══════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════
@@ -1681,7 +1771,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!showLFP) document.getElementById('field-lfp').value = '';
   });
 
+
+  // Template dropdown
+  document.getElementById('template-select').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    document.getElementById('field-evidence').value = e.target.value;
+    document.getElementById('field-evidence').focus();
+    const hint = document.getElementById('template-hint');
+    hint.style.display = e.target.value.includes('[') ? 'block' : 'none';
+    e.target.value = '';
+  });
+
   // Submit / submit & stop
+  attachTemplateDropdown('template-select', 'field-evidence');
   document.getElementById('btn-submit').addEventListener('click', handleSubmit);
   document.getElementById('btn-submit-stop').addEventListener('click', handleSubmitAndStop);
   document.getElementById('btn-signin-again').addEventListener('click', () => { showScreen('login'); });
