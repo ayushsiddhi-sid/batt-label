@@ -834,6 +834,842 @@
         <div class="form-divider"></div>
 
 
+
+        <div class="field-"en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Battery Labeling — CloudFactory</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --surface2: #222222;
+    --border: #2e2e2e;
+    --border-bright: #444;
+    --text: #e8e8e8;
+    --text-muted: #888;
+    --text-dim: #555;
+    --accent: #00d4a0;
+    --accent-dim: rgba(0,212,160,0.12);
+    --accent-glow: rgba(0,212,160,0.25);
+    --warn: #f5a623;
+    --warn-dim: rgba(245,166,35,0.12);
+    --error: #ff5f5f;
+    --error-dim: rgba(255,95,95,0.1);
+    --mono: 'IBM Plex Mono', monospace;
+    --sans: 'IBM Plex Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ── LAYOUT ── */
+  #app { display: flex; flex-direction: column; min-height: 100vh; }
+
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .logo {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    color: var(--accent);
+  }
+  .logo span { color: var(--text-muted); font-weight: 400; }
+
+  .header-right {
+    display: flex; align-items: center; gap: 16px;
+  }
+
+  .user-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 4px 10px;
+    border-radius: 3px;
+  }
+
+  .btn-ghost {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: none;
+    border: 1px solid var(--border);
+    padding: 5px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-ghost:hover { border-color: var(--border-bright); color: var(--text); }
+
+  main { flex: 1; padding: 20px 32px; max-width: 900px; margin: 0 auto; width: 100%; }
+
+  /* ── SCREENS ── */
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* ── LOGIN SCREEN ── */
+  #screen-login {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 56px);
+  }
+  #screen-login.active { display: flex; }
+
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 48px;
+    width: 420px;
+    text-align: center;
+  }
+
+  .login-card h2 {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .login-card p {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-bottom: 32px;
+    line-height: 1.6;
+  }
+
+  .google-btn {
+    width: 100%;
+    background: #fff;
+    color: #333;
+    border: none;
+    border-radius: 4px;
+    padding: 12px 20px;
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.15s;
+    margin-bottom: 12px;
+  }
+  .google-btn:hover { background: #f0f0f0; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+
+  .or-divider {
+    display: flex; align-items: center; gap: 12px;
+    margin: 16px 0;
+    color: var(--text-dim);
+    font-size: 11px;
+    font-family: var(--mono);
+  }
+  .or-divider::before, .or-divider::after {
+    content: ''; flex: 1; height: 1px; background: var(--border);
+  }
+
+  /* ── SETUP SCREEN ── */
+  #screen-setup { padding: 20px 0; }
+
+  .setup-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 32px;
+    max-width: 680px;
+  }
+
+  .setup-card h2 {
+    font-family: var(--mono);
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .setup-card .subtitle {
+    color: var(--text-muted);
+    font-size: 13px;
+    margin-bottom: 28px;
+    line-height: 1.6;
+  }
+
+  .step {
+    display: flex;
+    gap: 16px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .step:last-of-type { border-bottom: none; }
+
+  .step-num {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid var(--accent-glow);
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .step-content h3 {
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .step-content p {
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+    margin-bottom: 10px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 3px;
+    color: var(--accent);
+  }
+
+  .code-block {
+    font-family: var(--mono);
+    font-size: 11px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 14px;
+    color: var(--text-muted);
+    margin: 8px 0;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* ── FORM ELEMENTS ── */
+  .field-group { margin-bottom: 10px; }
+
+  label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  input[type="text"], input[type="email"], select, textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    padding: 7px 12px;
+    outline: none;
+    transition: border-color 0.15s;
+    appearance: none;
+  }
+  input:focus, select:focus, textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+  }
+  select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
+  select option { background: var(--surface2); }
+  textarea { resize: vertical; min-height: 52px; line-height: 1.5; }
+  input::placeholder, textarea::placeholder { color: var(--text-dim); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: #0f0f0f;
+    border: none;
+    border-radius: 4px;
+    padding: 11px 24px;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+  }
+  .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 20px;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-secondary:hover { border-color: var(--border-bright); }
+
+  /* ── ANNOTATION SCREEN ── */
+  .annotation-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 12px;
+    gap: 20px;
+  }
+
+  .task-meta h2 {
+    font-family: var(--mono);
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-bottom: 6px;
+  }
+
+  .battery-id {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.04em;
+  }
+
+  .progress-wrap {
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  .progress-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+
+  .progress-bar-outer {
+    width: 180px;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+  .progress-bar-inner {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.4s ease;
+  }
+
+  .progress-count {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .form-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+
+  .form-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 10px 0;
+  }
+
+  .conditional-fields {
+    background: var(--accent-dim);
+    border: 1px solid var(--accent-glow);
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: -4px;
+    margin-bottom: 10px;
+    display: none;
+  }
+  .conditional-fields.visible { display: block; }
+  .conditional-fields .field-group { margin-bottom: 16px; }
+  .conditional-fields .field-group:last-child { margin-bottom: 0; }
+
+  .conditional-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .conditional-label::before {
+    content: '↳';
+    font-size: 12px;
+  }
+
+  /* Checkbox */
+  .checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+    padding: 7px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    transition: all 0.15s;
+  }
+  .checkbox-field:hover { border-color: var(--border-bright); }
+
+  .checkbox-field input[type="checkbox"] {
+    width: 16px; height: 16px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  .checkbox-label-text {
+    font-size: 13px;
+    color: var(--text);
+    user-select: none;
+    line-height: 1.4;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 12px;
+    align-items: center;
+  }
+
+  .timer-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    padding: 5px 10px;
+    border-radius: 3px;
+  }
+
+  /* ── DONE SCREEN ── */
+  #screen-done {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    min-height: calc(100vh - 56px);
+  }
+  #screen-done.active { display: flex; }
+
+  .done-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 48px;
+    max-width: 480px;
+    text-align: center;
+  }
+  .done-icon {
+    font-size: 40px;
+    margin-bottom: 16px;
+  }
+  .done-card h2 {
+    font-family: var(--mono);
+    font-size: 18px;
+    margin-bottom: 8px;
+    color: var(--accent);
+  }
+  .done-card p { color: var(--text-muted); font-size: 13px; line-height: 1.6; }
+
+  /* ── ADMIN SCREEN ── */
+  .admin-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  .admin-header h2 {
+    font-family: var(--mono);
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 28px;
+  }
+
+  .stat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+  }
+  .stat-card .stat-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .stat-card .stat-value {
+    font-family: var(--mono);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .stat-card .stat-sub {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .section-title {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── TABLE ── */
+  .table-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    margin-bottom: 28px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    padding: 10px 14px;
+    text-align: left;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+  }
+
+  td {
+    font-size: 13px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    letter-spacing: 0.04em;
+  }
+  .badge-green { background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent-glow); }
+  .badge-yellow { background: var(--warn-dim); color: var(--warn); border: 1px solid rgba(245,166,35,0.3); }
+  .badge-gray { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+
+  /* ── TOAST ── */
+  #toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 18px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text);
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all 0.2s;
+    pointer-events: none;
+    z-index: 999;
+    max-width: 320px;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.success { border-color: var(--accent-glow); color: var(--accent); }
+  #toast.error { border-color: rgba(255,95,95,0.3); color: var(--error); }
+
+  /* ── LOADING ── */
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .loading-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(15,15,15,0.7);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .loading-overlay.active { display: flex; }
+  .loading-overlay p {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  /* ── INSTRUCTIONS PANEL ── */
+  .instructions-banner {
+    background: var(--warn-dim);
+    border: 1px solid rgba(245,166,35,0.3);
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    font-size: 12px;
+    color: var(--warn);
+    line-height: 1.6;
+    font-family: var(--mono);
+  }
+
+  /* ── OVERALL PROGRESS BAR ── */
+  .big-progress {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  .big-progress-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+  .big-progress-label { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+  .big-progress-pct { font-family: var(--mono); font-size: 22px; font-weight: 600; color: var(--accent); }
+  .big-bar-outer { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .big-bar-inner { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s ease; }
+
+  @media (max-width: 640px) {
+    main { padding: 24px 16px; }
+    .stats-grid { grid-template-columns: 1fr 1fr; }
+    .form-row { grid-template-columns: 1fr; }
+    .annotation-header { flex-direction: column; }
+    .progress-wrap { text-align: left; }
+    .progress-bar-outer { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header>
+    <div class="logo">CF<span>/</span>BATTERY-LABEL</div>
+    <div class="header-right">
+      <span class="user-badge" id="header-email" style="display:none"></span>
+      <button class="btn-ghost" id="btn-admin-toggle" style="display:none">Admin View</button>
+      <button class="btn-ghost" id="btn-logout" style="display:none">Sign out</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- LOGIN -->
+    <div class="screen" id="screen-login">
+      <div class="login-card">
+        <h2>Battery Labeling</h2>
+        <p>Sign in with your Google account to begin annotating battery chemistry data for Redwood Materials.</p>
+        <button class="google-btn" id="btn-google-signin">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z" fill="#34A853"/><path d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
+          Continue with Google
+        </button>
+        <p style="color:var(--text-dim);font-size:11px;margin-top:16px;font-family:var(--mono);">Sign in with the @es.cloudfactory.com Google account provided to CloudFactory.</p>
+      </div>
+    </div>
+
+    <!-- SETUP INSTRUCTIONS -->
+    <div class="screen" id="screen-setup">
+      <div class="setup-card">
+        <h2>One-time Setup Required</h2>
+        <p class="subtitle">Before the app can work, a Google Sheet needs to be connected as the database. This takes about 5 minutes and only needs to be done once.</p>
+
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <h3>Create a Google Sheet</h3>
+            <p>Go to <a href="https://sheets.new" target="_blank" style="color:var(--accent)">sheets.new</a> and create a blank spreadsheet. Name it something like <strong>Battery Labeling DB</strong>.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <h3>Enable Google Sheets API</h3>
+            <p>Go to <a href="https://console.cloud.google.com" target="_blank" style="color:var(--accent)">Google Cloud Console</a> → Create a new project → Enable the <strong>Google Sheets API</strong> and <strong>Google Drive API</strong>.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <h3>Create OAuth Credentials</h3>
+            <p>In Cloud Console → APIs & Services → Credentials → Create OAuth 2.0 Client ID → Web Application. Add your app URL as an authorized origin. Copy the <strong>Client ID</strong>.</p>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-content">
+            <h3>Enter credentials below</h3>
+            <div class="field-group" style="margin-top:12px">
+              <label>Google OAuth Client ID</label>
+              <input type="text" id="input-client-id" placeholder="xxxx.apps.googleusercontent.com" />
+            </div>
+            <div class="field-group">
+              <label>Google Sheet ID</label>
+              <input type="text" id="input-sheet-id" placeholder="From the URL: /d/SHEET_ID/edit" />
+              <p style="margin-top:6px; font-size:11px; color:var(--text-dim)">Found in your spreadsheet URL between /d/ and /edit</p>
+            </div>
+            <div class="field-group">
+              <label>Admin Emails (comma-separated)</label>
+              <input type="text" id="input-admins" value="ayush.siddhi@cloudfactory.com" />
+            </div>
+            <button class="btn-primary" id="btn-save-setup">Save & Launch App</button>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-num">5</div>
+          <div class="step-content">
+            <h3>Import your data</h3>
+            <p>Once set up, sign in as admin and use the <strong>Import Data</strong> button to upload your Excel file. The app will flatten all date sheets into the tasks sheet automatically.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ANNOTATION -->
+    <div class="screen" id="screen-annotate">
+      <div class="annotation-header">
+        <div class="task-meta">
+          <h2>Battery Identifier</h2>
+          <div class="battery-id" id="display-battery-id">—</div>
+        </div>
+        <div class="progress-wrap">
+          <div class="progress-label">Your progress</div>
+          <div class="progress-bar-outer">
+            <div class="progress-bar-inner" id="user-progress-bar" style="width:0%"></div>
+          </div>
+          <div class="progress-count" id="user-progress-count">0 completed</div>
+        </div>
+      </div>
+
+      <div class="form-card">
+        <div class="field-group">
+          <label>Label *</label>
+          <select id="field-label">
+            <option value="">— Select label —</option>
+            <option>Lithium</option>
+            <option>NiMH</option>
+            <option>NiCd</option>
+            <option>Lead</option>
+            <option>Alkaline</option>
+            <option>Zinc-Carbon</option>
+            <option>Silver</option>
+            <option>Mercury</option>
+            <option>Arsenic</option>
+            <option>Unknown</option>
+            <option>Data Error</option>
+          </select>
+        </div>
+
+        <div class="conditional-fields" id="lithium-fields">
+          <div class="conditional-label">Lithium sub-classification</div>
+          <div class="field-group">
+            <label>Lithium Sub-Label *</label>
+            <select id="field-sublabel">
+              <option value="">— Select sub-label —</option>
+              <option>Li-ion</option>
+              <option>Li Primary</option>
+              <option>Solid-state</option>
+              <option>Unknown</option>
+            </select>
+          </div>
+          <div class="conditional-fields" id="lfp-field" style="margin-top:0; margin-bottom:0;">
+            <div class="conditional-label">LFP classification</div>
+            <div class="field-group" style="margin-bottom:0">
+              <label>LFP (Lithium Iron Phosphate) *</label>
+              <select id="field-lfp">
+                <option value="">— Select —</option>
+                <option>Yes</option>
+                <option>No</option>
+                <option>Unknown</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-divider"></div>
+
+
         <div class="field-group">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
             <label style="margin-bottom:0">Evidence *</label>
@@ -842,22 +1678,21 @@
               <optgroup label="── Direct evidence ──">
                 <option value="The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.">1. Text visible</option>
                 <option value="The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.">2. Logo visible</option>
-                <option value="[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. [url]">3. Voltage / mAh indicator</option>
+                <option value="[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. URL added below.">3. Voltage / mAh indicator</option>
               </optgroup>
               <optgroup label="── Web search ──">
-                <option value="[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. [url]">4. Web search — chemistry clear</option>
+                <option value="[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. URL added below.">4. Web search — chemistry clear</option>
                 <option value="[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.">5. Web search — chemistry unclear</option>
               </optgroup>
               <optgroup label="── Multiple batteries ──">
-                <option value="Multiple batteries in image. [chemistry] text visible on [n] of [total] batteries in [cam].jpg.">6. Multiple batteries — chemistry clear</option>
-                <option value="Multiple batteries visible in image with different compositions: [chemistry 1] and [chemistry 2]. Cannot confirm single label — marked for review.">7. Multiple batteries — different chemistry</option>
-                <option value="Multiple batteries visible in image all identified to be [chemistry].">8. Multiple batteries — same chemistry</option>
+                <option value="Multiple batteries in image. All identified to be of [chemistry]; Logo/text visible on [cam].jpg.">6. Multiple batteries — same chemistry</option>
+                <option value="Multiple batteries visible in image with different compositions: [chemistry 1] on [cam].jpg and [chemistry 2] on [cam].jpg. Cannot confirm single label — marked as unknown.">7. Multiple batteries — different chemistry</option>
               </optgroup>
               <optgroup label="── Unknown / errors ──">
-                <option value="Unable to confirm battery type. [label obscured / distorted image / no visible markings].">9. Unknown / cannot confirm</option>
-                <option value="Data error — non-battery item in image. Marked as data error.">10. Data error — non-battery item</option>
-                <option value="Data error — product missing in [cam].jpg. Marked as data error.">11. Data error — product missing</option>
-                <option value="Data error — product in [cam] differs from other images in dataset. Marked as data error.">12. Data error — product mismatch</option>
+                <option value="Unable to confirm battery type. [label obscured / distorted image / no visible markings].">8. Unknown / cannot confirm</option>
+                <option value="Data error — non-battery item in image. Marked as data error.">9. Data error — non-battery item</option>
+                <option value="Data error — product missing in [cam].jpg. Marked as data error.">10. Data error — product missing</option>
+                <option value="Data error — product in [cam] differs from other images in dataset. Marked as data error.">11. Data error — product mismatch</option>
               </optgroup>
             </select>
           </div>
@@ -1674,16 +2509,15 @@ function signOut() {
 const EVIDENCE_TEMPLATES = [
   { group: 'Direct evidence', label: 'Text visible', text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
   { group: 'Direct evidence', label: 'Logo visible', text: 'The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.' },
-  { group: 'Direct evidence', label: 'Voltage / mAh indicator', text: '[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. [url]' },
-  { group: 'Web search', label: 'Web search — chemistry clear', text: '[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. [url]' },
-  { group: 'Web search', label: 'Web search — chemistry unclear', text: '[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.' },
-  { group: 'Multiple batteries', label: 'Multiple batteries — chemistry clear', text: 'Multiple batteries in image. [chemistry] text visible on [n] of [total] batteries in [cam].jpg.' },
-  { group: 'Multiple batteries', label: 'Multiple batteries — different chemistry', text: 'Multiple batteries visible in image with different compositions: [chemistry 1] and [chemistry 2]. Cannot confirm single label — marked for review.' },
-  { group: 'Multiple batteries', label: 'Multiple batteries — same chemistry', text: 'Multiple batteries visible in image identified to be [chemistry].' },
-  { group: 'Unknown', label: 'Unknown / cannot confirm', text: 'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
-  { group: 'Data error', label: 'Data error — non-battery item', text: 'Data error — non-battery item in image. Marked as data error.' },
-  { group: 'Data error', label: 'Data error — product missing', text: 'Data error — product missing in [cam].jpg. Marked as data error.' },
-  { group: 'Data error', label: 'Data error — different product', text: 'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
+  { group: 'Direct evidence', label: '3. Voltage / mAh indicator', text: '[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. URL added below.' },
+  { group: 'Web search', label: '4. Web search — chemistry clear', text: '[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. URL added below.' },
+  { group: 'Web search', label: '5. Web search — chemistry unclear', text: '[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.' },
+  { group: 'Multiple batteries', label: '6. Multiple batteries — same chemistry', text: 'Multiple batteries in image. All identified to be of [chemistry]; Logo/text visible on [cam].jpg.' },
+  { group: 'Multiple batteries', label: '7. Multiple batteries — different chemistry', text: 'Multiple batteries visible in image with different compositions: [chemistry 1] on [cam].jpg and [chemistry 2] on [cam].jpg. Cannot confirm single label — marked as unknown.' },
+  { group: 'Unknown / errors', label: '8. Unknown / cannot confirm', text: 'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
+  { group: 'Unknown / errors', label: '9. Data error — non-battery item', text: 'Data error — non-battery item in image. Marked as data error.' },
+  { group: 'Unknown / errors', label: '10. Data error — product missing', text: 'Data error — product missing in [cam].jpg. Marked as data error.' },
+  { group: 'Unknown / errors', label: '11. Data error — product mismatch', text: 'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
 ];
 
 function buildTemplateHTML() {
