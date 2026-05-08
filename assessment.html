@@ -1114,18 +1114,17 @@ function signOut() {
 
 
 const EVIDENCE_TEMPLATES = [
-  { group: 'Direct evidence', label: 'Text visible', text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
-  { group: 'Direct evidence', label: 'Logo visible', text: 'The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.' },
-  { group: 'Direct evidence', label: 'Voltage / mAh indicator', text: '[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. [url]' },
-  { group: 'Web search', label: 'Web search — chemistry clear', text: '[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. [url]' },
-  { group: 'Web search', label: 'Web search — chemistry unclear', text: '[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.' },
-  { group: 'Multiple batteries', label: 'Multiple batteries — chemistry clear', text: 'Multiple batteries in image. [chemistry] text visible on [n] of [total] batteries in [cam].jpg.' },
-  { group: 'Multiple batteries', label: 'Multiple batteries — different chemistry', text: 'Multiple batteries visible in image with different compositions: [chemistry 1] and [chemistry 2]. Cannot confirm single label — marked for review.' },
-  { group: 'Multiple batteries', label: 'Multiple batteries — same chemistry', text: 'Multiple batteries visible in image identified to be [chemistry].' },
-  { group: 'Unknown', label: 'Unknown / cannot confirm', text: 'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
-  { group: 'Data error', label: 'Data error — non-battery item', text: 'Data error — non-battery item in image. Marked as data error.' },
-  { group: 'Data error', label: 'Data error — product missing', text: 'Data error — product missing in [cam].jpg. Marked as data error.' },
-  { group: 'Data error', label: 'Data error — different product', text: 'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
+  { group: 'Direct evidence', label: '1. Text visible', text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
+  { group: 'Direct evidence', label: '2. Logo visible', text: 'The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.' },
+  { group: 'Direct evidence', label: '3. Voltage / mAh indicator', text: '[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. URL added below.' },
+  { group: 'Web search', label: '4. Web search — chemistry clear', text: '[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. URL added below.' },
+  { group: 'Web search', label: '5. Web search — chemistry unclear', text: '[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.' },
+  { group: 'Multiple batteries', label: '6. Multiple batteries — same chemistry', text: 'Multiple batteries in image. All identified to be of [chemistry]; Logo/text visible on [cam].jpg.' },
+  { group: 'Multiple batteries', label: '7. Multiple batteries — different chemistry', text: 'Multiple batteries visible in image with different compositions: [chemistry 1] on [cam].jpg and [chemistry 2] on [cam].jpg. Cannot confirm single label — marked as unknown.' },
+  { group: 'Unknown / errors', label: '8. Unknown / cannot confirm', text: 'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
+  { group: 'Unknown / errors', label: '9. Data error — non-battery item', text: 'Data error — non-battery item in image. Marked as data error.' },
+  { group: 'Unknown / errors', label: '10. Data error — product missing', text: 'Data error — product missing in [cam].jpg. Marked as data error.' },
+  { group: 'Unknown / errors', label: '11. Data error — product mismatch', text: 'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
 ];
 
 function buildTemplateHTML() {
