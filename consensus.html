@@ -717,50 +717,41 @@ async function getOrAssignTask(email){
   let data;
   try { data=await sheetsGet(`${SHEETS.CONSENSUS}!A:U`); } catch(e){ return {notSeeded:true}; }
   const rows=(data.values||[]).map(r=>{ while(r.length<21) r.push(''); return r; });
-  // Tab doesn't exist or has only a header / is empty
   if(!rows||rows.length<2) return {notSeeded:true};
 
-  // Batteries this annotator did in pass-1 (read from tasks sheet)
-  const p1Data=await sheetsGet(`${SHEETS.TASKS}!A:I`);
-  const p1Rows=(p1Data.values||[]).slice(1).map(r=>{ while(r.length<9) r.push(''); return r; });
-  const myPass1=new Set(p1Rows.filter(r=>r[8]===email&&r[0]).map(r=>r[0]));
+  // Build pass-1 battery set from same read — col E (index 4) = original_annotator
+  const myPass1=new Set();
+  for(let i=1;i<rows.length;i++){
+    if(rows[i][4]===email) myPass1.add(rows[i][0]);
+  }
 
-  const TIMEOUT_MINS = 90;
-  const now = Date.now();
-
-  // Release any in-progress rows that have been stuck beyond the timeout
-  // (annotator closed browser without submitting)
-  const releaseOps = [];
+  // Release stuck in-progress rows older than 90 min
+  const now=Date.now();
+  const staleOps=[];
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
-    if(r[8]==='in-progress' && r[7]!==email && r[9]){
-      const assignedAt = new Date(r[9]).getTime();
-      const elapsedMins = (now - assignedAt) / 60000;
-      if(elapsedMins > TIMEOUT_MINS){
-        releaseOps.push(sheetsUpdate(`${SHEETS.CONSENSUS}!H${i+1}:J${i+1}`, [['','unassigned','']]));
-        r[8]='unassigned'; r[7]=''; // update local copy so we can pick it up below
+    if(r[8]==='in-progress'&&r[7]!==email&&r[9]){
+      if((now-new Date(r[9]).getTime())/60000>90){
+        staleOps.push(sheetsUpdate(`${SHEETS.CONSENSUS}!H${i+1}:J${i+1}`,[['','unassigned','']]));
+        r[7]=''; r[8]='unassigned';
       }
     }
   }
-  if(releaseOps.length) await Promise.all(releaseOps);
+  if(staleOps.length) await Promise.all(staleOps);
 
-  // Resume own in-progress task if any
+  // Resume own in-progress task
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
     if(r[7]===email&&r[8]==='in-progress')
       return {rowIndex:i+1,batteryId:r[0],origLabel:r[1],origSub:r[2],origLfp:r[3],origAnnotator:r[4],stratum:r[5]};
   }
-  // Assign next unassigned — blind (skip own pass-1 batteries)
+
+  // Find next unassigned — skip batteries this annotator did in pass-1
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
     if((!r[8]||r[8]==='unassigned')&&!myPass1.has(r[0])){
       const rowNum=i+1;
-      try {
-        await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowNum}:J${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
-        // No verify pause — ownership is confirmed in submitTask before writing
-      } catch(e) {
-        throw new Error('Could not claim task: '+e.message);
-      }
+      await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowNum}:J${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
       return {rowIndex:rowNum,batteryId:r[0],origLabel:r[1],origSub:r[2],origLfp:r[3],origAnnotator:r[4],stratum:r[5]};
     }
   }
@@ -772,62 +763,30 @@ async function getOrAssignTask(email){
 // ═══════════════════════════════════════════════════════════════
 async function submitTask(rowIndex,fields,timeTaken){
   const task=state.currentTask;
+  // Compare labels in memory — no extra API call
+  const agree=
+    (task.origLabel||'').trim().toLowerCase()===(fields.label||'').trim().toLowerCase()&&
+    (task.origSub||'').trim().toLowerCase()===(fields.sublabel||'').trim().toLowerCase()&&
+    (task.origLfp||'').trim().toLowerCase()===(fields.lfp||'').trim().toLowerCase();
+  const consensus=agree?'agree':'disagree';
 
-  // Check token valid
-  if(!state.accessToken) throw new Error('Session expired — please sign out and sign in again');
-
-  // Verify row still belongs to this annotator before writing
-  // (prevents race condition where two annotators grabbed the same row)
-  const checkData = await sheetsGet(`${SHEETS.CONSENSUS}!H${rowIndex}:I${rowIndex}`);
-  const checkRow = ((checkData.values||[[]])[0]||[]);
-  const rowOwner = checkRow[0]||'';
-  const rowStatus = checkRow[1]||'';
-  if(rowOwner && rowOwner !== state.user.email) {
-    state.currentTask = null;
-    throw new Error('Task was reassigned — loading next task');
-  }
-  if(rowStatus === 'complete') {
-    state.currentTask = null;
-    throw new Error('Task already submitted — loading next task');
-  }
-
-  // Compare against pass-1 label
-  const p1Label=(task.origLabel||'').trim().toLowerCase();
-  const p2Label=(fields.label||'').trim().toLowerCase();
-  const p1Sub=(task.origSub||'').trim().toLowerCase();
-  const p2Sub=(fields.sublabel||'').trim().toLowerCase();
-  const p1Lfp=(task.origLfp||'').trim().toLowerCase();
-  const p2Lfp=(fields.lfp||'').trim().toLowerCase();
-  const consensus=p1Label===p2Label&&p1Sub===p2Sub&&p1Lfp===p2Lfp ? 'agree' : 'disagree';
-
-  const writeResult = await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:S${rowIndex}`,[[
-    state.user.email,
-    'complete',
-    '',
-    fields.label,
-    fields.sublabel||'',
-    fields.lfp||'',
-    fields.evidence,
-    fields.evidence_url||'',
+  // Single write — H:S
+  await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:S${rowIndex}`,[[    state.user.email,'complete','',
+    fields.label,fields.sublabel||'',fields.lfp||'',
+    fields.evidence,fields.evidence_url||'',
     fields.text_logo_visible?'Yes':'',
-    new Date().toISOString(),
-    timeTaken,
-    consensus
+    new Date().toISOString(),timeTaken,consensus
   ]]);
-  if(writeResult.error) throw new Error('Sheet write failed: ' + writeResult.error.message);
 
-  // Update annotator record
-  await updateAnnotatorRecord(state.user.email, consensus, timeTaken);
+  // Update annotator record — fire and forget, won't block next task
+  updateAnnotatorRecord(state.user.email,consensus,timeTaken).catch(e=>console.warn('Ann:',e));
 
-  // Session stats
   state.sessionCompleted++;
   if(consensus==='agree') state.sessionAgreed++;
   else state.sessionDisagreed++;
-
-  return consensus;
 }
 
-async function updateAnnotatorRecord(email, consensus, timeTaken){
+async function updateAnnotatorRecord(email,consensus,timeTaken){
   const data=await sheetsGet(`${SHEETS.ANN}!A:J`);
   const rows=data.values||[];
   let rowIdx=-1;
@@ -836,13 +795,11 @@ async function updateAnnotatorRecord(email, consensus, timeTaken){
   }
   const now=new Date().toISOString();
   if(rowIdx===-1){
-    const completed=1;
-    const agreements=consensus==='agree'?1:0;
-    const disagreements=consensus==='disagree'?1:0;
-    const errorRate=(disagreements/completed).toFixed(3);
-    const totalTime=timeTaken||0;
-    const avgTime=totalTime;
-    await sheetsAppend(`${SHEETS.ANN}!A:J`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now,fmtHMS(totalTime),fmtTime(avgTime)]]);
+    const dis=consensus==='disagree'?1:0;
+    await sheetsAppend(`${SHEETS.ANN}!A:J`,[[
+      email,1,consensus==='agree'?1:0,dis,dis.toFixed(3),
+      timeTaken||0,timeTaken||0,now,fmtHMS(timeTaken||0),fmtTime(timeTaken||0)
+    ]]);
   } else {
     const r=rows[rowIdx-1];
     const completed=(parseInt(r[1])||0)+1;
@@ -850,12 +807,14 @@ async function updateAnnotatorRecord(email, consensus, timeTaken){
     const disagreements=(parseInt(r[3])||0)+(consensus==='disagree'?1:0);
     const errorRate=(disagreements/completed).toFixed(3);
     const totalTime=(parseInt(r[5])||0)+(timeTaken||0);
-    const avgTime=completed>0?Math.round(totalTime/completed):0;
-    await sheetsUpdate(`${SHEETS.ANN}!A${rowIdx}:J${rowIdx}`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now,fmtHMS(totalTime),fmtTime(avgTime)]]);
+    const avgTime=Math.round(totalTime/completed);
+    await sheetsUpdate(`${SHEETS.ANN}!A${rowIdx}:J${rowIdx}`,[[
+      email,completed,agreements,disagreements,errorRate,
+      totalTime,avgTime,now,fmtHMS(totalTime),fmtTime(avgTime)
+    ]]);
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
 // TASK UI
 // ═══════════════════════════════════════════════════════════════
 function startTimer(){
@@ -1332,7 +1291,6 @@ document.addEventListener('DOMContentLoaded',()=>{
     const btn=document.getElementById('btn-submit');
     btn.disabled=true; btn.textContent='Submitting…';
     const timeTaken=stopTimer();
-    // Step 1: Submit the task
     try {
       const fields={
         label,
@@ -1344,31 +1302,13 @@ document.addEventListener('DOMContentLoaded',()=>{
         needs_review: document.getElementById('field-needs-review').checked,
       };
       await submitTask(state.currentTask.rowIndex, fields, timeTaken);
-    } catch(e){
-      console.error('Submit error:', e);
-      const msg = e.message || 'Unknown error';
-      if(msg.includes('reassigned') || msg.includes('already submitted')) {
-        showToast('Loading next task…', 'success');
-      } else {
-        showToast('Submit failed: ' + msg, 'error');
-        btn.disabled=false; btn.textContent='Submit →';
-        _submitting=false;
-        return;
-      }
-    }
-
-    // Step 2: Load next task — always runs even if submit had a minor error
-    // Reset button state first so annotator is never stuck
-    btn.textContent='Loading next task…';
-    _submitting=false;
-    try {
       await loadNextTask();
     } catch(e){
-      console.error('Load next task error:', e);
-      showToast('Saved! Tap "Check again" if next task doesn't load.', 'success');
-      // Show a manual retry option rather than leaving them stuck
-      showScreen('not-seeded');
+      console.error('Submit error:', e);
+      showToast('Submit failed: ' + (e.message||'Unknown error'), 'error');
+      btn.disabled=false; btn.textContent='Submit →';
     }
+    _submitting=false;
   });
 
   // Admin toggle
