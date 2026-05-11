@@ -1005,13 +1005,14 @@ function renderDisagreements(rows){
     const sameAnnotator = r[4] && r[7] && r[4].toLowerCase()===r[7].toLowerCase();
     const stratum=r[5]||'';
     const gold=r[19]||'';
-    const goldSub=r[20]||'';
-    const goldLfp=r[21]||'';
-    const goldBy=(r[22]||'').split('@')[0];
-    const showSub=gold==='Lithium';
-    const showLfp=showSub&&['Li-ion','Solid-state'].includes(goldSub);
-    const subOpts=['','Li-ion','Li Primary','Solid-state','Unknown'].map(v=>`<option value="${v}" ${goldSub===v?'selected':''}>${v||'Sub-label…'}</option>`).join('');
-    const lfpOpts=['','Yes','No','Unknown'].map(v=>`<option value="${v}" ${goldLfp===v?'selected':''}>${v||'LFP?'}</option>`).join('');
+    // Pre-fill sublabel/lfp from gold if set, otherwise suggest from pass-2 answer
+    const goldSub = r[20] || (gold==='Lithium' ? (p2Sub||p1Sub||'') : '');
+    const goldLfp = r[21] || (goldSub&&['Li-ion','Solid-state'].includes(goldSub) ? (p2Lfp||p1Lfp||'') : '');
+    const goldBy  = (r[22]||'').split('@')[0];
+    const showSub = gold==='Lithium' || (!gold && p1Label.toLowerCase()==='lithium');
+    const showLfp = showSub && ['Li-ion','Solid-state'].includes(goldSub);
+    const subOpts = ['','Li-ion','Li Primary','Solid-state','Unknown'].map(v=>`<option value="${v}" ${goldSub===v?'selected':''}>${v||'Sub-label…'}</option>`).join('');
+    const lfpOpts = ['','Yes','No','Unknown'].map(v=>`<option value="${v}" ${goldLfp===v?'selected':''}>${v||'LFP?'}</option>`).join('');
     const labelDiff=p1Label.toLowerCase()!==p2Label.toLowerCase();
     const subDiff=p1Sub.toLowerCase()!==p2Sub.toLowerCase();
     const lfpDiff=p1Lfp.toLowerCase()!==p2Lfp.toLowerCase();
@@ -1047,7 +1048,7 @@ function renderDisagreements(rows){
       <div class="gold-form">
         <label>Gold label:</label>
         <select id="gold-lbl-${i}" onchange="goldLabelChanged(${i})">${goldOpts}</select>
-        <select id="gold-sub-${i}" style="display:${showSub?'':'none'};width:120px">${subOpts}</select>
+        <select id="gold-sub-${i}" style="display:${showSub?'':'none'};width:120px" onchange="goldSubChanged(${i})">${subOpts}</select>
         <select id="gold-lfp-${i}" style="display:${showLfp?'':'none'};width:90px">${lfpOpts}</select>
         <button class="btn-secondary" onclick="setGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px">Save gold label</button>
         ${goldBy?`<span style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">set by ${goldBy}</span>`:''}
@@ -1057,18 +1058,23 @@ function renderDisagreements(rows){
 }
 
 function goldLabelChanged(idx){
-  const lbl = document.getElementById(`gold-lbl-${idx}`).value;
+  const lbl    = document.getElementById(`gold-lbl-${idx}`).value;
   const subSel = document.getElementById(`gold-sub-${idx}`);
   const lfpSel = document.getElementById(`gold-lfp-${idx}`);
   const isLithium = lbl === 'Lithium';
   subSel.style.display = isLithium ? '' : 'none';
   if(!isLithium){ subSel.value=''; lfpSel.value=''; lfpSel.style.display='none'; }
-  // show LFP if sublabel is Li-ion or Solid-state
-  subSel.onchange = function(){
-    const needsLfp = ['Li-ion','Solid-state'].includes(this.value);
-    lfpSel.style.display = needsLfp ? '' : 'none';
-    if(!needsLfp) lfpSel.value='';
-  };
+  // Trigger sublabel change to show/hide LFP correctly
+  goldSubChanged(idx);
+}
+
+function goldSubChanged(idx){
+  const subSel = document.getElementById(`gold-sub-${idx}`);
+  const lfpSel = document.getElementById(`gold-lfp-${idx}`);
+  if(!subSel) return;
+  const needsLfp = ['Li-ion','Solid-state'].includes(subSel.value);
+  lfpSel.style.display = needsLfp ? '' : 'none';
+  if(!needsLfp) lfpSel.value='';
 }
 
 async function setGoldLabel(rowNum, batteryId, idx){
