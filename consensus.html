@@ -1089,17 +1089,10 @@ function initTokenClient(){
       } catch(e){ showToast('Could not get user info: '+e.message,'error'); return; }
 
       // Step 2: load remote config — soft failure, falls back to defaults
-      try {
-        await loadConfig(resp.access_token);
-        const admins = CONFIG.ADMIN_EMAILS.join(', ');
-        showToast('Config loaded. Admins: ' + admins, 'success');
-      } catch(e){
-        showToast('Config failed: ' + e.message + ' — using defaults', 'error');
-        console.warn('Config load failed:', e);
-      }
+      try { await loadConfig(resp.access_token); }
+      catch(e){ console.warn('Config load failed, using defaults:', e.message); }
 
-      // Step 3: sign in — show which email and whether admin
-      showToast('Signing in as: ' + info.email + ' | isAdmin: ' + CONFIG.ADMIN_EMAILS.includes(info.email), 'success');
+      // Step 3: sign in
       try { await signInUser(info.email); }
       catch(e){ showToast('Sign-in error: '+e.message,'error'); }
     }
