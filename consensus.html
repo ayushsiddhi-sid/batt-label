@@ -392,7 +392,7 @@ function parseConfig(raw) {
 }
 
 const CLIENT_ID = '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com';
-const SCOPES    = 'openid email profile https://www.googleapis.com/auth/spreadsheets';
+const SCOPES    = 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly';
 let APP_CONFIG  = null;
 
 const CONFIG = {
@@ -494,6 +494,7 @@ async function sheetsUpdate(range,values){
   const res=await fetch(url,{method:'PUT',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json'},body:JSON.stringify({values})});
   const d=await res.json();
   if(d.error?.code===401){ await refreshToken(); return sheetsUpdate(range,values); }
+  if(d.error?.code===403) throw new Error('Permission denied — make sure the sheet is shared with your account as Editor');
   return d;
 }
 async function sheetsAppend(range,values){
@@ -501,6 +502,7 @@ async function sheetsAppend(range,values){
   const res=await fetch(url,{method:'POST',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json'},body:JSON.stringify({values})});
   const d=await res.json();
   if(d.error?.code===401){ await refreshToken(); return sheetsAppend(range,values); }
+  if(d.error?.code===403) throw new Error('Permission denied — make sure the sheet is shared with your account as Editor');
   return d;
 }
 async function ensureSheet(name,headers){
@@ -578,8 +580,11 @@ async function seedConsensusQueue(){
 
     // Read tasks sheet
     setLoading(true,'Reading completed tasks…');
+    // Read tasks tab — need col I (assigned_to=r[8]) and col J (status=r[9])
     const tData=await sheetsGet(`${SHEETS.TASKS}!A:N`);
-    const tRows=(tData.values||[]).slice(1).filter(r=>r[0]&&r[9]==='complete');
+    const tRows=(tData.values||[]).slice(1)
+      .map(r=>{ while(r.length<14) r.push(''); return r; })
+      .filter(r=>r[0]&&r[9]==='complete');
 
     // Read existing consensus to find already-seeded battery IDs
     const cData=await sheetsGet(`${SHEETS.CONSENSUS}!A:A`);
@@ -678,13 +683,13 @@ async function seedConsensusQueue(){
 async function getOrAssignTask(email){
   let data;
   try { data=await sheetsGet(`${SHEETS.CONSENSUS}!A:U`); } catch(e){ return {notSeeded:true}; }
-  const rows=data.values||[];
+  const rows=(data.values||[]).map(r=>{ while(r.length<21) r.push(''); return r; });
   // Tab doesn't exist or has only a header / is empty
   if(!rows||rows.length<2) return {notSeeded:true};
 
   // Batteries this annotator did in pass-1 (read from tasks sheet)
   const p1Data=await sheetsGet(`${SHEETS.TASKS}!A:I`);
-  const p1Rows=(p1Data.values||[]).slice(1);
+  const p1Rows=(p1Data.values||[]).slice(1).map(r=>{ while(r.length<9) r.push(''); return r; });
   const myPass1=new Set(p1Rows.filter(r=>r[8]===email&&r[0]).map(r=>r[0]));
 
   const TIMEOUT_MINS = 90;
@@ -717,7 +722,11 @@ async function getOrAssignTask(email){
     const r=rows[i];
     if((!r[8]||r[8]==='unassigned')&&!myPass1.has(r[0])){
       const rowNum=i+1;
-      await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowNum}:J${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
+      try {
+        await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowNum}:J${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
+      } catch(e) {
+        throw new Error('Could not claim task row '+rowNum+': '+e.message);
+      }
       return {rowIndex:rowNum,batteryId:r[0],origLabel:r[1],origSub:r[2],origLfp:r[3],origAnnotator:r[4],stratum:r[5]};
     }
   }
@@ -744,10 +753,13 @@ async function submitTask(rowIndex,fields,timeTaken){
   //              text_logo_visible(15) submitted_at(16) time_taken(17) consensus_status(18)
   // Also write status=complete in col I(8) and clear assigned_at col J(9) in same call
   // We do two updates: H:J for status, K:S for label data
-  await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:S${rowIndex}`,[[
-    state.user.email,   // H: assigned_to (confirm)
-    'complete',         // I: status
-    '',                 // J: assigned_at (clear)
+  // Check we still have a valid token before writing
+  if(!state.accessToken) throw new Error('Session expired — please sign out and sign in again');
+
+  const writeResult = await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:S${rowIndex}`,[[
+    state.user.email,
+    'complete',
+    '',
     fields.label,
     fields.sublabel||'',
     fields.lfp||'',
@@ -758,6 +770,7 @@ async function submitTask(rowIndex,fields,timeTaken){
     timeTaken,
     consensus
   ]]);
+  if(writeResult.error) throw new Error('Sheet write failed: ' + writeResult.error.message);
 
   // Update annotator record
   await updateAnnotatorRecord(state.user.email, consensus, timeTaken);
@@ -837,14 +850,18 @@ async function loadNextTask(){
     state.currentTask=task;
     resetForm();
     document.getElementById('display-battery-id').textContent=task.batteryId;
-    // Progress
-    const data=await sheetsGet(`${SHEETS.CONSENSUS}!A:I`);
-    const rows=(data.values||[]).slice(1).filter(r=>r[0]);
-    const total=rows.length;
-    const done=rows.filter(r=>r[8]==='complete').length;
-    document.getElementById('progress-fill').style.width=total?(done/total*100)+'%':'0%';
-    document.getElementById('progress-text').textContent=`${done} / ${total}`;
+    // Progress — non-blocking
     startTimer();
+    try {
+      const pData=await sheetsGet(`${SHEETS.CONSENSUS}!A:I`);
+      const pRows=(pData.values||[]).slice(1)
+        .filter(r=>r[0])
+        .map(r=>{ while(r.length<9) r.push(''); return r; });
+      const total=pRows.length;
+      const done=pRows.filter(r=>r[8]==='complete').length;
+      document.getElementById('progress-fill').style.width=total?(done/total*100)+'%':'0%';
+      document.getElementById('progress-text').textContent=`${done} / ${total}`;
+    } catch(e){ console.warn('Progress fetch failed:', e.message); }
   } catch(e){
     showToast('Error loading task: '+e.message,'error');
   }
@@ -861,7 +878,10 @@ async function loadAdminDashboard(){
       sheetsGet(`${SHEETS.CONSENSUS}!A:U`),
       sheetsGet(`${SHEETS.ANN}!A:H`)
     ]);
-    const cRows=(cData.values||[]).slice(1).filter(r=>r[0]);
+    // Pad all rows to 21 cols so r[8], r[18] etc are never undefined
+    const cRows=(cData.values||[]).slice(1)
+      .filter(r=>r[0])
+      .map(r=>{ while(r.length<21) r.push(''); return r; });
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
 
     const seeded=cRows.length;
@@ -1193,7 +1213,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   attachTemplateDropdown();
   showScreen('login');
 
-  document.getElementById('btn-signin').addEventListener('click',()=>window._tc.requestAccessToken({prompt:'select_account'}));
+  document.getElementById('btn-signin').addEventListener('click',()=>window._tc.requestAccessToken({prompt:'consent'}));
   document.getElementById('btn-logout').addEventListener('click',signOut);
 
   // Label conditional logic
@@ -1233,9 +1253,13 @@ document.addEventListener('DOMContentLoaded',()=>{
       await submitTask(state.currentTask.rowIndex, fields, timeTaken);
       await loadNextTask();
     } catch(e){
-      console.error('Submit error:', e);
-      showToast('Submit failed: ' + e.message, 'error');
+      console.error('Submit error full:', e);
+      const msg = e.message || 'Unknown error';
+      showToast('Submit failed: ' + msg, 'error');
+      // Keep button enabled so they can retry
       btn.disabled=false; btn.textContent='Submit →';
+      _submitting=false;
+      return;
     }
     _submitting=false;
   });
