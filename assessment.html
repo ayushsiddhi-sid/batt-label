@@ -381,11 +381,26 @@
         <div style="display:flex;gap:10px">
           <button class="btn-ghost" id="btn-refresh" style="display:inline-block">↻ Refresh</button>
           <button class="btn-ghost" id="btn-send-all" style="display:inline-block">✉ Send Results to All</button>
+          <button class="btn-ghost" id="btn-manage-admins" style="display:inline-block">⚙ Admins</button>
           <button class="btn-primary" id="btn-export">↓ Export Results</button>
         </div>
       </div>
 
-      <div class="stats-grid">
+      <!-- Admin Management Panel -->
+      <div id="admin-mgmt-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:20px;margin-bottom:24px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <span style="font-family:var(--mono);font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:var(--text-muted);">Manage Admins</span>
+          <button class="btn-ghost" id="btn-close-admin-mgmt" style="display:inline-block;padding:3px 10px;font-size:10px;">✕ Close</button>
+        </div>
+        <div id="admin-list" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;min-height:32px;"></div>
+        <div style="display:flex;gap:8px;">
+          <input type="email" id="input-new-admin" placeholder="new.admin@cloudfactory.com" style="flex:1;font-size:13px;" />
+          <button class="btn-primary" id="btn-add-admin" style="white-space:nowrap;">+ Add Admin</button>
+        </div>
+        <p style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-top:8px;">Changes take effect immediately. You cannot remove yourself.</p>
+      </div>
+
+      <div class="stats-grid" style="grid-template-columns:repeat(5,1fr)">
         <div class="stat-card">
           <div class="stat-label">Total Assessed</div>
           <div class="stat-value" id="stat-total">—</div>
@@ -401,6 +416,11 @@
         <div class="stat-card">
           <div class="stat-label">Pass Rate (≥70)</div>
           <div class="stat-value" id="stat-pass">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">CWs Passed</div>
+          <div class="stat-value" id="stat-cw-passed">—</div>
+          <div class="stat-sub" id="stat-cw-sub" style="font-family:var(--mono);font-size:11px;color:var(--text-dim);margin-top:4px;"></div>
         </div>
       </div>
 
@@ -418,6 +438,7 @@
               <th>Submitted</th>
               <th>Result</th>
               <th>Send</th>
+              <th>Reset</th>
             </tr>
           </thead>
           <tbody id="admin-tbody">
@@ -443,35 +464,94 @@
 // ═══════════════════════════════════════════════
 // CONFIG
 // ═══════════════════════════════════════════════
+// ─── Shared config loader ────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// CF BATTERY CONFIG LOADER  v1.0
+// Reads from a dedicated config-only Google Sheet (private).
+// Called once after OAuth completes. All three apps share this.
+// ═══════════════════════════════════════════════════════════════
+
+// The ONE hardcoded value across all apps — the config sheet ID.
+// This never changes. Everything else comes from the sheet.
+const CONFIG_SHEET_ID = '1axlYSB3d5H0tDO4M_UA73QmKUY60xkzTrUi2Wfz1cls';
+
+// Defaults — used if config sheet is unreachable or key is missing
+const CONFIG_DEFAULTS = {
+  admin_emails:                  'ayush.siddhi@cloudfactory.com, robina@cloudfactory.com',
+  labeling_sheet_id:             '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
+  assessment_sheet_id:           '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE',
+  consensus_sheet_id:            '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
+  assessment_version:            'v1',
+  assessment_gold_tab:           'ground_truth_v1',
+  assessment_passing_score:      '70',
+  consensus_confidence:          '0.95',
+  consensus_margin_error:        '0.035',
+  consensus_accuracy_target:     '0.95',
+  consensus_flag_threshold:      '2',
+  consensus_deepdive_threshold:  '3',
+  consensus_deepdive_error_rate: '0.25',
+};
+
+async function loadRemoteConfig(accessToken) {
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG_SHEET_ID}/values/config!A:B`;
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const rows = (data.values || []).slice(1); // skip header
+    const cfg = { ...CONFIG_DEFAULTS };
+    rows.forEach(r => { if (r[0] && r[1] !== undefined) cfg[r[0].trim()] = r[1].trim(); });
+    return cfg;
+  } catch(e) {
+    console.warn('Config sheet unreachable — using defaults:', e.message);
+    return { ...CONFIG_DEFAULTS };
+  }
+}
+
+function parseConfig(raw) {
+  return {
+    // Auth
+    adminEmails: raw.admin_emails.split(',').map(e => e.trim()).filter(Boolean),
+
+    // Sheet IDs per app
+    labelingSheetId:    raw.labeling_sheet_id,
+    assessmentSheetId:  raw.assessment_sheet_id,
+    consensusSheetId:   raw.consensus_sheet_id,
+
+    // Assessment
+    assessmentVersion:      raw.assessment_version,
+    assessmentGoldTab:      raw.assessment_gold_tab,
+    assessmentPassingScore: parseInt(raw.assessment_passing_score) || 70,
+
+    // Consensus
+    consensusSampleSize:        parseInt(raw.consensus_sample_size) || 774,
+    consensusFlagThreshold:     parseInt(raw.consensus_flag_threshold) || 2,
+    consensusDeepDiveThreshold: parseInt(raw.consensus_deepdive_threshold) || 3,
+    consensusDeepDiveErrorRate: parseFloat(raw.consensus_deepdive_error_rate) || 0.25,
+  };
+}
+
+const CLIENT_ID = '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com';
+const SCOPES    = 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send';
+let APP_CONFIG  = null;
+
+// CONFIG proxy — backward-compatible
 const CONFIG = {
-  CLIENT_ID: '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com',
-  SHEET_ID: '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE',
-  ADMIN_EMAILS: ['ayush.siddhi@cloudfactory.com'],
-  SCOPES: 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/gmail.send'
+  CLIENT_ID,
+  get SHEET_ID()      { return APP_CONFIG ? APP_CONFIG.assessmentSheetId : '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE'; },
+  get ADMIN_EMAILS()  { return APP_CONFIG ? APP_CONFIG.adminEmails : ['ayush.siddhi@cloudfactory.com']; },
+  set ADMIN_EMAILS(v) { if (APP_CONFIG) APP_CONFIG.adminEmails = v; },
+  get PASSING_SCORE() { return APP_CONFIG ? APP_CONFIG.assessmentPassingScore : 70; },
+  SCOPES,
 };
 
 const SHEETS = { RESPONSES: 'responses', ANNOTATORS: 'annotators' };
 
 // ═══════════════════════════════════════════════
-// GROUND TRUTH — hardcoded, never shown to annotator
+// GROUND TRUTH — loaded from sheet after OAuth
+// Populated by loadGroundTruth() on sign-in
 // ═══════════════════════════════════════════════
-const GROUND_TRUTH = [
-  { id: 'L1-20260224-001408', label: 'NiCd',       sublabel: '',        lfp: '',        scoreVisible: true  },
-  { id: 'L1-20260224-000835', label: 'Lithium',     sublabel: 'Li-ion',  lfp: 'Unknown', scoreVisible: true  },
-  { id: 'L1-20260227-002753', label: 'Lithium',     sublabel: 'Li-ion',  lfp: 'Unknown', scoreVisible: false },
-  { id: 'L1-20260224-001381', label: 'NiCd',        sublabel: '',        lfp: '',        scoreVisible: false },
-  { id: 'L1-20260227-002778', label: 'NiMH',        sublabel: '',        lfp: '',        scoreVisible: false },
-  { id: 'L1-20260227-002797', label: 'Lithium',     sublabel: 'Li-ion',  lfp: 'No',      scoreVisible: null  },
-  { id: 'L1-20260227-002802', label: 'Lithium',     sublabel: 'Li-ion',  lfp: 'No',      scoreVisible: null  },
-  { id: 'L1-20260227-003210', label: 'Lithium',     sublabel: 'Li-ion',  lfp: 'No',      scoreVisible: null  },
-  { id: 'L1-20260224-001411', label: 'NiCd',        sublabel: '',        lfp: '',        scoreVisible: null  },
-  { id: 'L1-20260224-001413', label: 'NiMH',        sublabel: '',        lfp: '',        scoreVisible: null  },
-  { id: 'L1-20260409-012057', label: 'Data Error',  sublabel: '',        lfp: '',        scoreVisible: null  },
-  { id: 'L1-20260225-001629', label: 'Lead',        sublabel: '',        lfp: '',        scoreVisible: null  },
-  { id: 'L1-20260408-007141', label: 'NiCd',        sublabel: '',        lfp: '',        scoreVisible: null  },
-  { id: 'L1-20260224-001431', label: 'NiCd',        sublabel: '',        lfp: '',        scoreVisible: true  },
-  { id: 'L1-20260409-011557', label: 'Unknown',     sublabel: '',        lfp: '',        scoreVisible: null  },
-];
+let GROUND_TRUTH = [];
 
 // ═══════════════════════════════════════════════
 // STATE
@@ -794,12 +874,12 @@ function showResults(score, correct, partial, incorrect) {
   document.getElementById('score-display').innerHTML = `${score}<span>/100</span>`;
   document.getElementById('score-sub').textContent =
     score >= 90 ? 'Excellent work!' :
-    score >= 70 ? 'Good job — above pass threshold.' :
+    score >= CONFIG.PASSING_SCORE ? 'Good job — above pass threshold.' :
     score >= 50 ? 'Below pass threshold — review required.' :
     'Needs significant improvement.';
 
   const bar = document.getElementById('score-bar');
-  bar.style.background = score >= 70 ? 'var(--green)' : score >= 50 ? 'var(--warn)' : 'var(--red)';
+  bar.style.background = score >= CONFIG.PASSING_SCORE ? 'var(--green)' : score >= 50 ? 'var(--warn)' : 'var(--red)';
   setTimeout(() => bar.style.width = score + '%', 100);
 
   document.getElementById('stat-correct').textContent = correct;
@@ -823,29 +903,37 @@ async function loadAdminDashboard() {
     const pass = total > 0 ? rows.filter(r => parseFloat(r[1]) >= 70).length : 0;
     const passRate = total > 0 ? Math.round((pass / total) * 100) + '%' : '—';
 
+    // CW passed = annotators who scored >= 70
+    const cwPassed = pass;
+    const cwTotal = total;
+
     document.getElementById('stat-total').textContent = total;
     document.getElementById('stat-avg').textContent = total > 0 ? avg : '—';
     document.getElementById('stat-top').textContent = total > 0 ? top : '—';
     document.getElementById('stat-pass').textContent = passRate;
+    document.getElementById('stat-cw-passed').textContent = total > 0 ? cwPassed : '—';
+    document.getElementById('stat-cw-sub').textContent = total > 0 ? `of ${cwTotal} assessed` : '';
 
     const tbody = document.getElementById('admin-tbody');
     if (rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:24px;">No results yet</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" style="color:var(--text-dim);text-align:center;padding:24px;">No results yet</td></tr>';
     } else {
       const sorted = [...rows].sort((a, b) => (parseFloat(b[1]) || 0) - (parseFloat(a[1]) || 0));
-      tbody.innerHTML = sorted.map(r => {
+      tbody.innerHTML = sorted.map((r, idx) => {
         const score = parseFloat(r[1]) || 0;
-        const passed = score >= 70;
+        const passed = score >= CONFIG.PASSING_SCORE;
+        const emailSafe = r[0].replace(/'/g, "\'");
         return `<tr>
           <td style="font-family:var(--mono);font-size:12px">${r[0]}</td>
-          <td class="pts-cell" style="color:${score >= 70 ? 'var(--green)' : score >= 50 ? 'var(--warn)' : 'var(--red)'}">${score}</td>
+          <td class="pts-cell" style="color:${score >= CONFIG.PASSING_SCORE ? 'var(--green)' : score >= 50 ? 'var(--warn)' : 'var(--red)'}">${score}</td>
           <td style="color:var(--green)">${r[2] || 0}</td>
           <td style="color:var(--warn)">${r[3] || 0}</td>
           <td style="color:var(--red)">${r[4] || 0}</td>
           <td style="font-family:var(--mono);font-size:12px">${formatSeconds(parseInt(r[5]))}</td>
           <td style="font-size:12px;color:var(--text-muted)">${r[6] ? new Date(r[6]).toLocaleString() : '—'}</td>
           <td><span class="badge ${passed ? 'badge-green' : 'badge-red'}">${passed ? 'Pass' : 'Fail'}</span></td>
-          <td><button class="btn-ghost" style="display:inline-block;padding:3px 10px;font-size:10px" onclick="sendResultEmail('${r[0]}', ${score}, ${r[2]||0}, ${r[3]||0}, ${r[4]||0})">Send</button></td>
+          <td><button class="btn-ghost" style="display:inline-block;padding:3px 10px;font-size:10px" onclick="sendResultEmail('${emailSafe}', ${score}, ${r[2]||0}, ${r[3]||0}, ${r[4]||0})">Send</button></td>
+          <td><button class="btn-ghost" style="display:inline-block;padding:3px 10px;font-size:10px;color:var(--warn);border-color:rgba(245,166,35,0.3)" onclick="resetAnnotator('${emailSafe}')">↺ Reset</button></td>
         </tr>`;
       }).join('');
     }
@@ -862,7 +950,7 @@ async function fetchAnnotatorResponses(email) {
 }
 
 function buildEmailBody(email, score, correct, partial, incorrect, responseRows) {
-  const passed = score >= 70;
+  const passed = score >= CONFIG.PASSING_SCORE;
   const firstName = email.split('.')[0];
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -1050,12 +1138,38 @@ function initTokenClient() {
         });
         const info = await res.json();
         if (!info.email) throw new Error('No email returned');
+        await loadConfig(resp.access_token);
+        await loadGroundTruth();
         await signInUser(info.email, info.name || info.email);
       } catch(e) {
         showToast('Could not get user info — please try again', 'error');
       }
     }
   });
+}
+
+async function loadGroundTruth() {
+  // Reads ground truth from the tab named in config (e.g. ground_truth_v1)
+  // Tab lives in the assessment sheet.
+  // Columns: battery_id, label, sublabel, lfp, score_visible
+  const tab = APP_CONFIG ? APP_CONFIG.assessmentGoldTab : 'ground_truth_v1';
+  try {
+    const data = await sheetsGet(`${tab}!A:E`);
+    const rows = (data.values || []).slice(1).filter(r => r[0]);
+    GROUND_TRUTH = rows.map(r => ({
+      id:           r[0] || '',
+      label:        r[1] || '',
+      sublabel:     r[2] || '',
+      lfp:          r[3] || '',
+      scoreVisible: r[4] === 'true' ? true : r[4] === 'false' ? false : null,
+    }));
+    if (GROUND_TRUTH.length === 0) throw new Error('Empty ground truth tab: ' + tab);
+    console.log(`Loaded ${GROUND_TRUTH.length} ground truth tasks from "${tab}"`);
+  } catch(e) {
+    showToast('Failed to load ground truth: ' + e.message, 'error');
+    console.error(e);
+    throw e;
+  }
 }
 
 async function signInUser(email, name) {
@@ -1080,7 +1194,7 @@ async function signInUser(email, name) {
 
     // Check if already completed
     const data = await sheetsGet(`${SHEETS.ANNOTATORS}!A:A`);
-    const emails = (data.values || []).slice(1).map(r => r[0]);
+    const emails = (data.values || []).slice(1).map(r => r[0]).filter(Boolean);
     if (emails.includes(email)) {
       showScreen('done');
       setLoading(false);
@@ -1096,6 +1210,88 @@ async function signInUser(email, name) {
   } catch(e) {
     showToast(e.message, 'error');
     signOut();
+  }
+  setLoading(false);
+}
+
+// ═══════════════════════════════════════════════
+// ADMIN MANAGEMENT
+// ═══════════════════════════════════════════════
+function renderAdminList() {
+  const list = document.getElementById('admin-list');
+  list.innerHTML = CONFIG.ADMIN_EMAILS.map(email => `
+    <span style="display:inline-flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:3px;padding:4px 10px;font-family:var(--mono);font-size:11px;color:var(--text-muted);">
+      ${email}
+      ${email !== state.user.email ? `<button onclick="removeAdmin('${email}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;line-height:1;padding:0 0 0 4px;" title="Remove">✕</button>` : '<span style="color:var(--accent);font-size:10px;margin-left:2px;">(you)</span>'}
+    </span>`).join('');
+}
+
+function removeAdmin(email) {
+  if (email === state.user.email) { showToast("You can\'t remove yourself", 'error'); return; }
+  CONFIG.ADMIN_EMAILS = CONFIG.ADMIN_EMAILS.filter(e => e !== email);
+  saveAdminConfig();
+  renderAdminList();
+  showToast(`Removed ${email}`);
+}
+
+function addAdmin(email) {
+  email = email.trim().toLowerCase();
+  if (!email || !email.includes('@')) { showToast('Enter a valid email', 'error'); return; }
+  if (CONFIG.ADMIN_EMAILS.includes(email)) { showToast('Already an admin', 'error'); return; }
+  CONFIG.ADMIN_EMAILS.push(email);
+  saveAdminConfig();
+  renderAdminList();
+  document.getElementById('input-new-admin').value = '';
+  showToast(`Added ${email} as admin`);
+}
+
+function saveAdminConfig() {
+  // Admin changes now go through config sheet directly
+}
+
+function loadAdminConfig() {
+  // No-op — admin emails loaded from remote config sheet after OAuth
+}
+
+// ═══════════════════════════════════════════════
+// RESET ANNOTATOR
+// ═══════════════════════════════════════════════
+async function resetAnnotator(email) {
+  if (!confirm(`Reset assessment for ${email}?\n\nThis will delete their score and all response rows so they can retake the assessment. This cannot be undone.`)) return;
+
+  setLoading(true, `Resetting ${email}...`);
+  try {
+    // 1. Delete from annotators tab
+    const annData = await sheetsGet(`${SHEETS.ANNOTATORS}!A:A`);
+    const annRows = annData.values || [];
+    let annRowIdx = -1;
+    for (let i = 1; i < annRows.length; i++) {
+      if (annRows[i][0] === email) { annRowIdx = i + 1; break; }
+    }
+
+    if (annRowIdx !== -1) {
+      // Clear the row (can't delete rows via Sheets API values endpoint; clear contents instead)
+      const totalCols = 8;
+      const emptyRow = [Array(totalCols).fill('')];
+      await sheetsUpdate(`${SHEETS.ANNOTATORS}!A${annRowIdx}:H${annRowIdx}`, emptyRow);
+    }
+
+    // 2. Clear matching rows from responses tab
+    const respData = await sheetsGet(`${SHEETS.RESPONSES}!A:N`);
+    const respRows = respData.values || [];
+    const updates = [];
+    for (let i = 1; i < respRows.length; i++) {
+      if (respRows[i][0] === email) {
+        updates.push(sheetsUpdate(`${SHEETS.RESPONSES}!A${i+1}:N${i+1}`, [Array(14).fill('')]));
+      }
+    }
+    if (updates.length) await Promise.all(updates);
+
+    showToast(`${email} has been reset — they can retake the assessment`);
+    await loadAdminDashboard();
+  } catch(e) {
+    showToast('Reset failed: ' + e.message, 'error');
+    console.error(e);
   }
   setLoading(false);
 }
@@ -1157,6 +1353,7 @@ function attachTemplateDropdown(selectId, textareaId) {
 // INIT
 // ═══════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
+  loadAdminConfig();
   initTokenClient();
   showScreen('login');
 
@@ -1201,12 +1398,19 @@ document.addEventListener('DOMContentLoaded', () => {
       await sendAllResults();
     }
   });
-});
-</script>
-</body>
-</html>
-ndAllResults();
-    }
+  document.getElementById('btn-manage-admins').addEventListener('click', () => {
+    const panel = document.getElementById('admin-mgmt-panel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    if (panel.style.display === 'block') renderAdminList();
+  });
+  document.getElementById('btn-close-admin-mgmt').addEventListener('click', () => {
+    document.getElementById('admin-mgmt-panel').style.display = 'none';
+  });
+  document.getElementById('btn-add-admin').addEventListener('click', () => {
+    addAdmin(document.getElementById('input-new-admin').value);
+  });
+  document.getElementById('input-new-admin').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addAdmin(document.getElementById('input-new-admin').value);
   });
 });
 </script>
