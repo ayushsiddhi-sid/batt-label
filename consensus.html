@@ -249,6 +249,20 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
   </div>
 </div>
 
+<!-- DIAGNOSTIC -->
+<div class="screen" id="screen-diagnostic">
+  <div style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 56px)">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:32px;width:560px">
+      <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--accent);margin-bottom:16px">Connection Diagnostic</div>
+      <div id="diag-output" style="font-family:var(--mono);font-size:12px;color:var(--text-muted);line-height:2"></div>
+      <div style="margin-top:20px;display:flex;gap:10px">
+        <button class="btn-primary" onclick="runDiagnostic()" style="font-size:11px">↻ Run again</button>
+        <button class="btn-secondary" onclick="showScreen('login');signOut()" style="font-size:11px">Sign out</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ADMIN -->
 <div class="screen" id="screen-admin">
   <div class="admin-header">
@@ -725,8 +739,16 @@ async function getOrAssignTask(email){
       const rowNum=i+1;
       try {
         await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowNum}:J${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
+        // Brief pause then verify the write stuck (catches race conditions)
+        await new Promise(res=>setTimeout(res,300));
+        const verify=await sheetsGet(`${SHEETS.CONSENSUS}!H${rowNum}:I${rowNum}`);
+        const verifyRow=((verify.values||[[]])[0]||[]);
+        if(verifyRow[0]!==email||verifyRow[1]!=='in-progress') {
+          // Another annotator won the race — skip this row and continue
+          continue;
+        }
       } catch(e) {
-        throw new Error('Could not claim task row '+rowNum+': '+e.message);
+        throw new Error('Could not claim task: '+e.message);
       }
       return {rowIndex:rowNum,batteryId:r[0],origLabel:r[1],origSub:r[2],origLfp:r[3],origAnnotator:r[4],stratum:r[5]};
     }
@@ -740,6 +762,24 @@ async function getOrAssignTask(email){
 async function submitTask(rowIndex,fields,timeTaken){
   const task=state.currentTask;
 
+  // Check token valid
+  if(!state.accessToken) throw new Error('Session expired — please sign out and sign in again');
+
+  // Verify row still belongs to this annotator before writing
+  // (prevents race condition where two annotators grabbed the same row)
+  const checkData = await sheetsGet(`${SHEETS.CONSENSUS}!H${rowIndex}:I${rowIndex}`);
+  const checkRow = ((checkData.values||[[]])[0]||[]);
+  const rowOwner = checkRow[0]||'';
+  const rowStatus = checkRow[1]||'';
+  if(rowOwner && rowOwner !== state.user.email) {
+    state.currentTask = null;
+    throw new Error('Task was reassigned — loading next task');
+  }
+  if(rowStatus === 'complete') {
+    state.currentTask = null;
+    throw new Error('Task already submitted — loading next task');
+  }
+
   // Compare against pass-1 label
   const p1Label=(task.origLabel||'').trim().toLowerCase();
   const p2Label=(fields.label||'').trim().toLowerCase();
@@ -748,14 +788,6 @@ async function submitTask(rowIndex,fields,timeTaken){
   const p1Lfp=(task.origLfp||'').trim().toLowerCase();
   const p2Lfp=(fields.lfp||'').trim().toLowerCase();
   const consensus=p1Label===p2Label&&p1Sub===p2Sub&&p1Lfp===p2Lfp ? 'agree' : 'disagree';
-
-  // Write label fields + mark complete in one update
-  // Columns K-S: label(10) sublabel(11) lfp(12) evidence(13) evidence_url(14)
-  //              text_logo_visible(15) submitted_at(16) time_taken(17) consensus_status(18)
-  // Also write status=complete in col I(8) and clear assigned_at col J(9) in same call
-  // We do two updates: H:J for status, K:S for label data
-  // Check we still have a valid token before writing
-  if(!state.accessToken) throw new Error('Session expired — please sign out and sign in again');
 
   const writeResult = await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:S${rowIndex}`,[[
     state.user.email,
@@ -1179,6 +1211,54 @@ async function signInUser(email){
   }
 }
 
+async function runDiagnostic(){
+  const out = document.getElementById('diag-output');
+  const log = (msg, ok=null) => {
+    const color = ok===true?'var(--green)':ok===false?'var(--red)':'var(--text-muted)';
+    out.innerHTML += `<div style="color:${color}">${msg}</div>`;
+  };
+  out.innerHTML = '';
+  log('Starting diagnostic…');
+
+  // 1. Token
+  log(state.accessToken ? '✓ Token present' : '✗ No token — please sign in again', !!state.accessToken);
+
+  // 2. Read consensus_tasks
+  try {
+    const d = await sheetsGet(`${SHEETS.CONSENSUS}!A1:A2`);
+    log('✓ Can read consensus_tasks tab', true);
+  } catch(e) { log('✗ Cannot read consensus_tasks: ' + e.message, false); }
+
+  // 3. Write test — write to a temp cell and read it back
+  try {
+    const testVal = 'diag_' + Date.now();
+    await sheetsUpdate(`${SHEETS.CONSENSUS}!V1`, [[testVal]]);
+    const verify = await sheetsGet(`${SHEETS.CONSENSUS}!V1`);
+    const got = ((verify.values||[[]])[0]||[])[0]||'';
+    if(got === testVal) {
+      log('✓ Can write to consensus_tasks tab', true);
+      // Clean up
+      await sheetsUpdate(`${SHEETS.CONSENSUS}!V1`, [['']]); 
+    } else {
+      log('✗ Write succeeded but value mismatch — possible caching issue', false);
+    }
+  } catch(e) { log('✗ Cannot write to consensus_tasks: ' + e.message, false); }
+
+  // 4. Read tasks tab (for blind assignment)
+  try {
+    const d = await sheetsGet(`${SHEETS.TASKS}!A1:A2`);
+    log('✓ Can read tasks tab', true);
+  } catch(e) { log('✗ Cannot read tasks tab: ' + e.message, false); }
+
+  // 5. Annotator record write
+  try {
+    const d = await sheetsGet(`${SHEETS.ANN}!A1:A2`);
+    log('✓ Can read consensus_annotators tab', true);
+  } catch(e) { log('✗ Cannot read consensus_annotators: ' + e.message, false); }
+
+  log('Diagnostic complete.');
+}
+
 function signOut(){
   state.user=null; state.accessToken=null; state.currentTask=null;
   clearInterval(state.timerInterval);
@@ -1256,8 +1336,21 @@ document.addEventListener('DOMContentLoaded',()=>{
     } catch(e){
       console.error('Submit error full:', e);
       const msg = e.message || 'Unknown error';
-      showToast('Submit failed: ' + msg, 'error');
-      // Keep button enabled so they can retry
+      // If row was reassigned or already submitted, silently load next task
+      if(msg.includes('reassigned') || msg.includes('already submitted')) {
+        showToast('Loading next task…', 'success');
+        _submitting=false;
+        await loadNextTask();
+        return;
+      }
+      showToast('Submit failed: ' + msg + ' — tap to diagnose', 'error');
+      // Show diagnostic screen so annotator can see exactly what failed
+      setTimeout(()=>{
+        if(confirm('Submit failed: ' + msg + '\n\nRun connection diagnostic?')) {
+          showScreen('diagnostic');
+          runDiagnostic();
+        }
+      }, 500);
       btn.disabled=false; btn.textContent='Submit →';
       _submitting=false;
       return;
