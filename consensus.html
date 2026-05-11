@@ -298,7 +298,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     <div class="section-title">Per-annotator error count — flag if ≥2 disagreements, deep-dive if ≥3 or &gt;25% error rate</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Annotator</th><th>Tasks sampled</th><th>Completed</th><th>Agreed</th><th>Disagreed</th><th>Error rate</th><th>Status</th></tr></thead>
+        <thead><tr><th>Annotator</th><th>Tasks sampled</th><th>Completed</th><th>Agreed</th><th>Disagreed</th><th>Error rate</th><th>Total time</th><th>Avg time/task</th><th>Last active</th><th>Status</th></tr></thead>
         <tbody id="tbody-cw"></tbody>
       </table>
     </div>
@@ -559,7 +559,7 @@ async function seedConsensusQueue(){
       'submitted_at','time_taken_seconds','consensus_status','gold_label','gold_set_by'
     ]);
     await ensureSheet(SHEETS.ANN,[
-      'email','completed','agreements','disagreements','error_rate','last_active'
+      'email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active'
     ]);
 
     // Read tasks sheet
@@ -735,7 +735,7 @@ async function submitTask(rowIndex,fields,timeTaken){
   ]]);
 
   // Update annotator record
-  await updateAnnotatorRecord(state.user.email, consensus);
+  await updateAnnotatorRecord(state.user.email, consensus, timeTaken);
 
   // Session stats
   state.sessionCompleted++;
@@ -745,25 +745,31 @@ async function submitTask(rowIndex,fields,timeTaken){
   return consensus;
 }
 
-async function updateAnnotatorRecord(email,consensus){
-  const data=await sheetsGet(`${SHEETS.ANN}!A:F`);
+async function updateAnnotatorRecord(email, consensus, timeTaken){
+  const data=await sheetsGet(`${SHEETS.ANN}!A:H`);
   const rows=data.values||[];
   let rowIdx=-1;
   for(let i=1;i<rows.length;i++){
     if(rows[i][0]===email){ rowIdx=i+1; break; }
   }
+  const now=new Date().toISOString();
   if(rowIdx===-1){
-    // New annotator
-    const completed=1, agreements=consensus==='agree'?1:0, disagreements=consensus==='disagree'?1:0;
-    const errorRate=disagreements/completed;
-    await sheetsAppend(`${SHEETS.ANN}!A:F`,[[email,completed,agreements,disagreements,errorRate.toFixed(3),new Date().toISOString()]]);
+    const completed=1;
+    const agreements=consensus==='agree'?1:0;
+    const disagreements=consensus==='disagree'?1:0;
+    const errorRate=(disagreements/completed).toFixed(3);
+    const totalTime=timeTaken||0;
+    const avgTime=totalTime;
+    await sheetsAppend(`${SHEETS.ANN}!A:H`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now]]);
   } else {
     const r=rows[rowIdx-1];
     const completed=(parseInt(r[1])||0)+1;
     const agreements=(parseInt(r[2])||0)+(consensus==='agree'?1:0);
     const disagreements=(parseInt(r[3])||0)+(consensus==='disagree'?1:0);
-    const errorRate=disagreements/completed;
-    await sheetsUpdate(`${SHEETS.ANN}!A${rowIdx}:F${rowIdx}`,[[email,completed,agreements,disagreements,errorRate.toFixed(3),new Date().toISOString()]]);
+    const errorRate=(disagreements/completed).toFixed(3);
+    const totalTime=(parseInt(r[5])||0)+(timeTaken||0);
+    const avgTime=completed>0?Math.round(totalTime/completed):0;
+    await sheetsUpdate(`${SHEETS.ANN}!A${rowIdx}:H${rowIdx}`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now]]);
   }
 }
 
@@ -828,7 +834,7 @@ async function loadAdminDashboard(){
   try {
     const [cData,aData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:U`),
-      sheetsGet(`${SHEETS.ANN}!A:F`)
+      sheetsGet(`${SHEETS.ANN}!A:H`)
     ]);
     const cRows=(cData.values||[]).slice(1).filter(r=>r[0]);
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
@@ -916,6 +922,10 @@ function renderCW(aRows, cRows){
   });
 
   const tbody=document.getElementById('tbody-cw');
+  // Build time map from annotators sheet (cols F=total_time G=avg_time H=last_active)
+  const timeMap={};
+  aRows.forEach(r=>{ if(r[0]) timeMap[r[0]]={totalTime:parseInt(r[5])||0, avgTime:parseInt(r[6])||0, lastActive:r[7]||''}; });
+
   const sorted=Object.entries(annTasks).sort((a,b)=>b[1].disagreed-a[1].disagreed);
   tbody.innerHTML=sorted.map(([ann,d])=>{
     const errorRate=d.completed?d.disagreed/d.completed:0;
@@ -928,6 +938,10 @@ function renderCW(aRows, cRows){
       :'<span class="badge badge-gray">pending</span>';
     const shortAnn=ann.split('@')[0];
     const rowClass=isDeepDive?'deepdive-row':isFlag?'flag-row':'';
+    const t=timeMap[ann]||{};
+    const totalFmt=t.totalTime?fmtTime(t.totalTime):'—';
+    const avgFmt=t.avgTime?fmtTime(t.avgTime):'—';
+    const lastFmt=t.lastActive?new Date(t.lastActive).toLocaleString():'—';
     return `<tr class="${rowClass}">
       <td style="font-family:var(--mono);font-size:12px">${shortAnn}</td>
       <td>${d.sampled}</td>
@@ -935,6 +949,9 @@ function renderCW(aRows, cRows){
       <td style="color:var(--green)">${d.agreed}</td>
       <td style="color:${d.disagreed>=2?'var(--red)':'var(--text)'}">${d.disagreed}</td>
       <td style="font-family:var(--mono);font-size:12px;color:${errorRate>0.15?'var(--warn)':'var(--text-muted)'}">${d.completed?(errorRate*100).toFixed(0)+'%':'—'}</td>
+      <td style="font-family:var(--mono);font-size:12px;color:var(--text-muted)">${totalFmt}</td>
+      <td style="font-family:var(--mono);font-size:12px;color:var(--text-muted)">${avgFmt}</td>
+      <td style="font-size:11px;color:var(--text-dim)">${lastFmt}</td>
       <td>${statusBadge}</td>
     </tr>`;
   }).join('');
@@ -1016,7 +1033,7 @@ async function exportResults(){
   try {
     const [cData,aData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:U`),
-      sheetsGet(`${SHEETS.ANN}!A:F`)
+      sheetsGet(`${SHEETS.ANN}!A:H`)
     ]);
     const cRows=(cData.values||[]).slice(1).filter(r=>r[0]&&r[8]==='complete');
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
@@ -1034,11 +1051,11 @@ async function exportResults(){
 
     // Sheet 2: CW performance
     const ws2=XLSX.utils.aoa_to_sheet([
-      ['annotator','tasks_sampled','completed','agreements','disagreements','error_rate','status'],
+      ['annotator','tasks_sampled','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active','status'],
       ...aRows.map(r=>{
         const dis=parseInt(r[3])||0; const er=parseFloat(r[4])||0;
-        const status=dis>=3||er>0.25?'deep-dive':dis>=2?'flagged':'ok';
-        return [r[0],'-',r[1],r[2],r[3],r[4],status];
+        const status=dis>=CONFIG.DEEPDIVE_THRESHOLD||er>CONFIG.DEEPDIVE_ERROR_RATE?'deep-dive':dis>=CONFIG.FLAG_THRESHOLD?'flagged':'ok';
+        return [r[0],'-',r[1],r[2],r[3],r[4],r[5]||0,r[6]||0,r[7]||'',status];
       })
     ]);
     XLSX.utils.book_append_sheet(wb,ws2,'CW Performance');
