@@ -497,20 +497,38 @@ function moe(n,N){ if(!n||n<=0) return 1; n=Math.min(n,N); const base=1.96*Math.
 // ═══════════════════════════════════════════════════════════════
 // SHEETS API
 // ═══════════════════════════════════════════════════════════════
-async function sheetsGet(range){
-  const url=`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}`;
-  const res=await fetch(url,{headers:{Authorization:'Bearer '+state.accessToken}});
-  const d=await res.json();
-  if(d.error?.code===401){ await refreshToken(); return sheetsGet(range); }
-  return d;
+async function sheetsGet(range, timeoutMs=15000){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  try {
+    const url=`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}`;
+    const res=await fetch(url,{headers:{Authorization:'Bearer '+state.accessToken},signal:controller.signal});
+    clearTimeout(timer);
+    const d=await res.json();
+    if(d.error?.code===401){ await refreshToken(); return sheetsGet(range); }
+    return d;
+  } catch(e) {
+    clearTimeout(timer);
+    if(e.name==='AbortError') throw new Error('Request timed out — please check your connection');
+    throw e;
+  }
 }
-async function sheetsUpdate(range,values){
-  const url=`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
-  const res=await fetch(url,{method:'PUT',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json'},body:JSON.stringify({values})});
-  const d=await res.json();
-  if(d.error?.code===401){ await refreshToken(); return sheetsUpdate(range,values); }
-  if(d.error?.code===403) throw new Error('Permission denied — make sure the sheet is shared with your account as Editor');
-  return d;
+async function sheetsUpdate(range,values,timeoutMs=15000){
+  const controller = new AbortController();
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  try {
+    const url=`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+    const res=await fetch(url,{method:'PUT',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json'},body:JSON.stringify({values}),signal:controller.signal});
+    clearTimeout(timer);
+    const d=await res.json();
+    if(d.error?.code===401){ await refreshToken(); return sheetsUpdate(range,values); }
+    if(d.error?.code===403) throw new Error('Permission denied — make sure the sheet is shared with your account as Editor');
+    return d;
+  } catch(e) {
+    clearTimeout(timer);
+    if(e.name==='AbortError') throw new Error('Request timed out — please check your connection');
+    throw e;
+  }
 }
 async function sheetsAppend(range,values){
   const url=`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
@@ -739,14 +757,7 @@ async function getOrAssignTask(email){
       const rowNum=i+1;
       try {
         await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowNum}:J${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
-        // Brief pause then verify the write stuck (catches race conditions)
-        await new Promise(res=>setTimeout(res,300));
-        const verify=await sheetsGet(`${SHEETS.CONSENSUS}!H${rowNum}:I${rowNum}`);
-        const verifyRow=((verify.values||[[]])[0]||[]);
-        if(verifyRow[0]!==email||verifyRow[1]!=='in-progress') {
-          // Another annotator won the race — skip this row and continue
-          continue;
-        }
+        // No verify pause — ownership is confirmed in submitTask before writing
       } catch(e) {
         throw new Error('Could not claim task: '+e.message);
       }
@@ -1321,6 +1332,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     const btn=document.getElementById('btn-submit');
     btn.disabled=true; btn.textContent='Submitting…';
     const timeTaken=stopTimer();
+    // Step 1: Submit the task
     try {
       const fields={
         label,
@@ -1332,30 +1344,31 @@ document.addEventListener('DOMContentLoaded',()=>{
         needs_review: document.getElementById('field-needs-review').checked,
       };
       await submitTask(state.currentTask.rowIndex, fields, timeTaken);
-      await loadNextTask();
     } catch(e){
-      console.error('Submit error full:', e);
+      console.error('Submit error:', e);
       const msg = e.message || 'Unknown error';
-      // If row was reassigned or already submitted, silently load next task
       if(msg.includes('reassigned') || msg.includes('already submitted')) {
         showToast('Loading next task…', 'success');
+      } else {
+        showToast('Submit failed: ' + msg, 'error');
+        btn.disabled=false; btn.textContent='Submit →';
         _submitting=false;
-        await loadNextTask();
         return;
       }
-      showToast('Submit failed: ' + msg + ' — tap to diagnose', 'error');
-      // Show diagnostic screen so annotator can see exactly what failed
-      setTimeout(()=>{
-        if(confirm('Submit failed: ' + msg + '\n\nRun connection diagnostic?')) {
-          showScreen('diagnostic');
-          runDiagnostic();
-        }
-      }, 500);
-      btn.disabled=false; btn.textContent='Submit →';
-      _submitting=false;
-      return;
     }
+
+    // Step 2: Load next task — always runs even if submit had a minor error
+    // Reset button state first so annotator is never stuck
+    btn.textContent='Loading next task…';
     _submitting=false;
+    try {
+      await loadNextTask();
+    } catch(e){
+      console.error('Load next task error:', e);
+      showToast('Saved! Tap "Check again" if next task doesn't load.', 'success');
+      // Show a manual retry option rather than leaving them stuck
+      showScreen('not-seeded');
+    }
   });
 
   // Admin toggle
