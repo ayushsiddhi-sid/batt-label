@@ -243,7 +243,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
       <p style="color:var(--text-muted);font-size:13px;margin-top:8px;line-height:1.6">The consensus task queue hasn't been seeded yet.<br>An admin needs to sign in and click <strong>Run seed</strong> first.</p>
       <div style="margin-top:24px;display:flex;gap:10px;justify-content:center">
         <button class="btn-secondary" onclick="loadNextTask()" style="display:inline-block">↻ Check again</button>
-        <button class="btn-ghost" id="btn-goto-admin-ns" style="display:inline-block">Admin view</button>
+        <button class="btn-ghost" id="btn-goto-admin-ns" style="display:inline-block">⚑ Seed queue (admin)</button>
       </div>
     </div>
   </div>
@@ -673,7 +673,26 @@ async function getOrAssignTask(email){
   const p1Rows=(p1Data.values||[]).slice(1);
   const myPass1=new Set(p1Rows.filter(r=>r[8]===email&&r[0]).map(r=>r[0]));
 
-  // Resume in-progress
+  const TIMEOUT_MINS = 90;
+  const now = Date.now();
+
+  // Release any in-progress rows that have been stuck beyond the timeout
+  // (annotator closed browser without submitting)
+  const releaseOps = [];
+  for(let i=1;i<rows.length;i++){
+    const r=rows[i];
+    if(r[8]==='in-progress' && r[7]!==email && r[9]){
+      const assignedAt = new Date(r[9]).getTime();
+      const elapsedMins = (now - assignedAt) / 60000;
+      if(elapsedMins > TIMEOUT_MINS){
+        releaseOps.push(sheetsUpdate(`${SHEETS.CONSENSUS}!H${i+1}:J${i+1}`, [['','unassigned','']]));
+        r[8]='unassigned'; r[7]=''; // update local copy so we can pick it up below
+      }
+    }
+  }
+  if(releaseOps.length) await Promise.all(releaseOps);
+
+  // Resume own in-progress task if any
   for(let i=1;i<rows.length;i++){
     const r=rows[i];
     if(r[7]===email&&r[8]==='in-progress')
@@ -774,16 +793,16 @@ async function loadNextTask(){
   try {
     const task=await getOrAssignTask(state.user.email);
     if(!task||task.notSeeded){
-      // Queue not seeded yet — show holding screen instead of done
       showScreen('not-seeded'); setLoading(false); return;
     }
     if(task.queueDone){
-      // Genuinely all tasks complete for this annotator
       document.getElementById('done-completed').textContent=state.sessionCompleted;
       document.getElementById('done-agreed').textContent=state.sessionAgreed;
       document.getElementById('done-disagreed').textContent=state.sessionDisagreed;
       showScreen('done'); setLoading(false); return;
     }
+    // Only show task screen now that we have a real task
+    showScreen('task');
     state.currentTask=task;
     resetForm();
     document.getElementById('display-battery-id').textContent=task.batteryId;
@@ -1086,9 +1105,15 @@ async function signInUser(email){
   document.getElementById('header-email').textContent=email;
   document.getElementById('header-email').style.display='';
   document.getElementById('btn-logout').style.display='';
-  if(state.isAdmin) document.getElementById('btn-admin-toggle').style.display='';
-  showScreen('task');
-  await loadNextTask();
+  if(state.isAdmin){
+    document.getElementById('btn-admin-toggle').style.display='';
+    // Admins go straight to dashboard — they can click "Start labeling" if they want tasks
+    showScreen('admin');
+    await loadAdminDashboard();
+  } else {
+    setLoading(true, 'Loading your tasks…');
+    await loadNextTask();
+  }
 }
 
 function signOut(){
@@ -1169,11 +1194,20 @@ document.addEventListener('DOMContentLoaded',()=>{
   // Admin toggle
   document.getElementById('btn-admin-toggle').addEventListener('click',()=>{
     const adminScreen=document.getElementById('screen-admin');
-    if(adminScreen.classList.contains('active')){ showScreen('task'); }
-    else { showScreen('admin'); loadAdminDashboard(); }
+    if(adminScreen.classList.contains('active')){
+      // Switch to task flow
+      setLoading(true,'Loading your tasks…');
+      loadNextTask();
+    } else {
+      showScreen('admin');
+      loadAdminDashboard();
+    }
   });
 
-  document.getElementById('btn-back-to-task').addEventListener('click',()=>showScreen('task'));
+  document.getElementById('btn-back-to-task').addEventListener('click',()=>{
+    setLoading(true,'Loading your tasks…');
+    loadNextTask();
+  });
   document.getElementById('btn-goto-admin-ns').addEventListener('click',()=>{
     if(state.isAdmin){ showScreen('admin'); loadAdminDashboard(); }
     else showToast('Admin access required','error');
