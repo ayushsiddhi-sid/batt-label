@@ -477,6 +477,7 @@ function setLoading(show,text='Loading…'){
   document.getElementById('loading-overlay').classList.toggle('active',show);
 }
 function fmtTime(s){ if(!s||isNaN(s)) return '—'; const m=Math.floor(s/60); return `${String(m).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`; }
+function fmtHMS(s){ if(!s||isNaN(s)) return '—'; const h=Math.floor(s/3600); const m=Math.floor((s%3600)/60); const sec=Math.floor(s%60); return h>0?`${h}h ${m}m`:`${m}m ${sec}s`; }
 function moe(n,N){ if(!n||n<=0) return 1; n=Math.min(n,N); const base=1.96*Math.sqrt(0.95*0.05/n); return N ? base*Math.sqrt((N-n)/(N-1)) : base; }
 
 // ═══════════════════════════════════════════════════════════════
@@ -575,7 +576,7 @@ async function seedConsensusQueue(){
       'submitted_at','time_taken_seconds','consensus_status','gold_label','gold_set_by'
     ]);
     await ensureSheet(SHEETS.ANN,[
-      'email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active'
+      'email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss'
     ]);
 
     // Read tasks sheet
@@ -784,7 +785,7 @@ async function submitTask(rowIndex,fields,timeTaken){
 }
 
 async function updateAnnotatorRecord(email, consensus, timeTaken){
-  const data=await sheetsGet(`${SHEETS.ANN}!A:H`);
+  const data=await sheetsGet(`${SHEETS.ANN}!A:J`);
   const rows=data.values||[];
   let rowIdx=-1;
   for(let i=1;i<rows.length;i++){
@@ -798,7 +799,7 @@ async function updateAnnotatorRecord(email, consensus, timeTaken){
     const errorRate=(disagreements/completed).toFixed(3);
     const totalTime=timeTaken||0;
     const avgTime=totalTime;
-    await sheetsAppend(`${SHEETS.ANN}!A:H`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now]]);
+    await sheetsAppend(`${SHEETS.ANN}!A:J`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now,fmtHMS(totalTime),fmtTime(avgTime)]]);
   } else {
     const r=rows[rowIdx-1];
     const completed=(parseInt(r[1])||0)+1;
@@ -807,7 +808,7 @@ async function updateAnnotatorRecord(email, consensus, timeTaken){
     const errorRate=(disagreements/completed).toFixed(3);
     const totalTime=(parseInt(r[5])||0)+(timeTaken||0);
     const avgTime=completed>0?Math.round(totalTime/completed):0;
-    await sheetsUpdate(`${SHEETS.ANN}!A${rowIdx}:H${rowIdx}`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now]]);
+    await sheetsUpdate(`${SHEETS.ANN}!A${rowIdx}:J${rowIdx}`,[[email,completed,agreements,disagreements,errorRate,totalTime,avgTime,now,fmtHMS(totalTime),fmtTime(avgTime)]]);
   }
 }
 
@@ -876,7 +877,7 @@ async function loadAdminDashboard(){
   try {
     const [cData,aData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:U`),
-      sheetsGet(`${SHEETS.ANN}!A:H`)
+      sheetsGet(`${SHEETS.ANN}!A:J`)
     ]);
     // Pad all rows to 21 cols so r[8], r[18] etc are never undefined
     const cRows=(cData.values||[]).slice(1)
@@ -1078,7 +1079,7 @@ async function exportResults(){
   try {
     const [cData,aData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:U`),
-      sheetsGet(`${SHEETS.ANN}!A:H`)
+      sheetsGet(`${SHEETS.ANN}!A:J`)
     ]);
     const cRows=(cData.values||[]).slice(1).filter(r=>r[0]&&r[8]==='complete');
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
