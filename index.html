@@ -1822,11 +1822,12 @@ function initTokenClient() {
       // If already signed in (token refresh), skip sign-in flow
       if (state.user) return;
 
+      let info;
       try {
         const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
           headers: { Authorization: 'Bearer ' + resp.access_token }
         });
-        const info = await res.json();
+        info = await res.json();
         if (!info.email) throw new Error('No email returned from Google');
       } catch(e) { showToast('Could not get user info: ' + e.message, 'error'); return; }
 
