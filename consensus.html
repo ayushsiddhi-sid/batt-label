@@ -43,7 +43,7 @@ main{max-width:960px;margin:0 auto;padding:24px 32px}
 .progress-bar{width:160px;height:4px;background:var(--surface2);border-radius:2px;overflow:hidden}
 .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s}
 .timer-display{font-family:var(--mono);font-size:13px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);padding:4px 12px;border-radius:3px}
-.form-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:28px}
+.form-card{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:28px;overflow-y:auto;max-height:calc(100vh - 180px)}
 .field{margin-bottom:20px}
 .field label{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);display:block;margin-bottom:8px}
 select,input[type=text],textarea{width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--text);font-family:var(--sans);font-size:13px;padding:9px 12px;border-radius:3px;outline:none;transition:border .15s}
@@ -199,10 +199,10 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     <div class="field">
       <label>Evidence <span style="color:var(--red)">*</span></label>
       <div class="template-row">
-        <select id="template-select"><option value="">Use a template…</option></select>
-        <button class="btn-secondary" id="btn-use-template" style="padding:8px 14px;font-size:11px">Use</button>
+        <select id="template-select"></select>
       </div>
-      <textarea id="field-evidence" placeholder="Describe the evidence used to determine the battery type…" rows="3"></textarea>
+      <textarea id="field-evidence" placeholder="Describe the evidence supporting your label. Include camera references where applicable (e.g. 'Li-ion text visible on Cam 2, 3')."></textarea>
+      <div id="template-hint" style="font-family:var(--mono);font-size:10px;color:var(--accent);margin-top:4px;display:none;">↳ Replace text in [ ] with specific details</div>
     </div>
     <div class="field">
       <label>Evidence URL <span style="color:var(--text-dim);font-weight:400">(optional)</span></label>
@@ -425,18 +425,32 @@ const STRATA_POOLS = {
   'Lead':6,'Alkaline':1,'Zinc-Carbon':1,'Mercury':1
 };
 
-const TEMPLATES = [
-  'The presence of visible Li-ion text in {img}.jpg provides sufficient evidence.',
-  'The presence of visible Li-ion recycling logo in {img}.jpg provides sufficient evidence.',
-  'The presence of visible Ni-Cd text in {img}.jpg provides sufficient evidence.',
-  'The presence of visible NiMH text in {img}.jpg provides sufficient evidence.',
-  'Unable to confirm battery type. [label obscured / no visible markings].',
-  'Data error — product missing in {img}.jpg. Marked as data error.',
-  'Web search confirms battery composition as {type}.',
-  'The battery label in {img}.jpg clearly states {type}.',
-  'Image shows different product from dataset — marked as data error.',
-  'No visible text or logo in any image. Cannot determine battery type.',
+const EVIDENCE_TEMPLATES = [
+  { group: 'Direct evidence', label: 'Text visible',                    text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
+  { group: 'Direct evidence', label: 'Logo visible',                    text: 'The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.' },
+  { group: 'Direct evidence', label: 'Voltage / mAh indicator',        text: '[voltage/mAh] visible in [cam].jpg indicating [chemistry]. Product [confirmed/unconfirmed]. URL added below.' },
+  { group: 'Web search',      label: 'Web search — chemistry clear',   text: '[brand/part number] visible in [cam].jpg. Web search confirms [chemistry]. URL added below.' },
+  { group: 'Web search',      label: 'Web search — chemistry unclear', text: '[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.' },
+  { group: 'Multiple batteries', label: 'Multiple — same chemistry',   text: 'Multiple batteries in image. All identified to be of [chemistry]; Logo/text visible on [cam].jpg.' },
+  { group: 'Multiple batteries', label: 'Multiple — different chemistry', text: 'Multiple batteries visible in image with different compositions: [chemistry 1] on [cam].jpg and [chemistry 2] on [cam].jpg. Cannot confirm single label — marked as unknown.' },
+  { group: 'Unknown / errors', label: 'Unknown / cannot confirm',       text: 'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
+  { group: 'Unknown / errors', label: 'Data error — non-battery item', text: 'Data error — non-battery item in image. Marked as data error.' },
+  { group: 'Unknown / errors', label: 'Data error — product missing',  text: 'Data error — product missing in [cam].jpg. Marked as data error.' },
+  { group: 'Unknown / errors', label: 'Data error — product mismatch', text: 'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
 ];
+
+function buildTemplateHTML() {
+  const groups = [...new Set(EVIDENCE_TEMPLATES.map(t => t.group))];
+  let html = '<option value="">+ Insert template...</option>';
+  groups.forEach(g => {
+    html += `<optgroup label="${g}">`;
+    EVIDENCE_TEMPLATES.filter(t => t.group === g).forEach(t => {
+      html += `<option value="${t.text.replace(/"/g, '&quot;')}">${t.label}</option>`;
+    });
+    html += '</optgroup>';
+  });
+  return html;
+}
 
 const LABELS = ['Lithium','NiCd','NiMH','Lead','Alkaline','Zinc-Carbon','Mercury','Unknown','Data Error'];
 
@@ -715,7 +729,8 @@ async function getOrAssignTask(email){
 // ═══════════════════════════════════════════════════════════════
 async function submitTask(rowIndex,fields,timeTaken){
   const task=state.currentTask;
-  // Compare against pass-1
+
+  // Compare against pass-1 label
   const p1Label=(task.origLabel||'').trim().toLowerCase();
   const p2Label=(fields.label||'').trim().toLowerCase();
   const p1Sub=(task.origSub||'').trim().toLowerCase();
@@ -724,8 +739,18 @@ async function submitTask(rowIndex,fields,timeTaken){
   const p2Lfp=(fields.lfp||'').trim().toLowerCase();
   const consensus=p1Label===p2Label&&p1Sub===p2Sub&&p1Lfp===p2Lfp ? 'agree' : 'disagree';
 
-  await sheetsUpdate(`${SHEETS.CONSENSUS}!K${rowIndex}:S${rowIndex}`,[[
-    fields.label, fields.sublabel||'', fields.lfp||'',
+  // Write label fields + mark complete in one update
+  // Columns K-S: label(10) sublabel(11) lfp(12) evidence(13) evidence_url(14)
+  //              text_logo_visible(15) submitted_at(16) time_taken(17) consensus_status(18)
+  // Also write status=complete in col I(8) and clear assigned_at col J(9) in same call
+  // We do two updates: H:J for status, K:S for label data
+  await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:S${rowIndex}`,[[
+    state.user.email,   // H: assigned_to (confirm)
+    'complete',         // I: status
+    '',                 // J: assigned_at (clear)
+    fields.label,
+    fields.sublabel||'',
+    fields.lfp||'',
     fields.evidence,
     fields.evidence_url||'',
     fields.text_logo_visible?'Yes':'',
@@ -1146,13 +1171,17 @@ function signOut(){
 // FORM LOGIC
 // ═══════════════════════════════════════════════════════════════
 function attachTemplateDropdown(){
-  const sel=document.getElementById('template-select');
-  TEMPLATES.forEach((t,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=t.substring(0,60)+'…'; sel.appendChild(o); });
-  document.getElementById('btn-use-template').addEventListener('click',()=>{
-    const idx=parseInt(sel.value);
-    if(isNaN(idx)) return;
-    document.getElementById('field-evidence').value=TEMPLATES[idx];
-    sel.value='';
+  const sel = document.getElementById('template-select');
+  const box = document.getElementById('field-evidence');
+  const hint = document.getElementById('template-hint');
+  sel.innerHTML = buildTemplateHTML();
+  sel.addEventListener('change', () => {
+    if (!sel.value) return;
+    box.value = sel.value;
+    box.focus();
+    // Show hint if template has [brackets] to fill in
+    hint.style.display = sel.value.includes('[') ? '' : 'none';
+    sel.value = '';
   });
 }
 
@@ -1193,16 +1222,19 @@ document.addEventListener('DOMContentLoaded',()=>{
     const timeTaken=stopTimer();
     try {
       const fields={
-        label, sublabel:document.getElementById('field-sublabel').value,
-        lfp:document.getElementById('field-lfp').value,
-        evidence, evidence_url:document.getElementById('field-evidence-url').value.trim(),
-        text_logo_visible:document.getElementById('field-text-logo').checked,
-        needs_review:document.getElementById('field-needs-review').checked,
+        label,
+        sublabel: document.getElementById('field-sublabel').value || '',
+        lfp:      document.getElementById('field-lfp').value || '',
+        evidence,
+        evidence_url: document.getElementById('field-evidence-url').value.trim(),
+        text_logo_visible: document.getElementById('field-text-logo').checked,
+        needs_review: document.getElementById('field-needs-review').checked,
       };
-      await submitTask(state.currentTask.rowIndex,fields,timeTaken);
+      await submitTask(state.currentTask.rowIndex, fields, timeTaken);
       await loadNextTask();
     } catch(e){
-      showToast('Submit failed: '+e.message,'error');
+      console.error('Submit error:', e);
+      showToast('Submit failed: ' + e.message, 'error');
       btn.disabled=false; btn.textContent='Submit →';
     }
     _submitting=false;
