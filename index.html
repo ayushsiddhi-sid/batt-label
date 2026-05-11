@@ -1044,13 +1044,85 @@
 
 <script>
 // ═══════════════════════════════════════════════
-// CONFIG — loaded from localStorage after setup
+// CONFIG — loaded from remote config sheet after OAuth
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// CF BATTERY CONFIG LOADER  v1.0
+// Reads from a dedicated config-only Google Sheet (private).
+// Called once after OAuth completes. All three apps share this.
+// ═══════════════════════════════════════════════════════════════
+
+// The ONE hardcoded value across all apps — the config sheet ID.
+// This never changes. Everything else comes from the sheet.
+const CONFIG_SHEET_ID = '1axlYSB3d5H0tDO4M_UA73QmKUY60xkzTrUi2Wfz1cls';
+
+// Defaults — used if config sheet is unreachable or key is missing
+const CONFIG_DEFAULTS = {
+  admin_emails:                  'ayush.siddhi@cloudfactory.com, robina@cloudfactory.com',
+  labeling_sheet_id:             '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
+  assessment_sheet_id:           '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE',
+  consensus_sheet_id:            '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
+  assessment_version:            'v1',
+  assessment_gold_tab:           'ground_truth_v1',
+  assessment_passing_score:      '70',
+  consensus_confidence:          '0.95',
+  consensus_margin_error:        '0.035',
+  consensus_accuracy_target:     '0.95',
+  consensus_flag_threshold:      '2',
+  consensus_deepdive_threshold:  '3',
+  consensus_deepdive_error_rate: '0.25',
+};
+
+async function loadRemoteConfig(accessToken) {
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG_SHEET_ID}/values/config!A:B`;
+    const res = await fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const rows = (data.values || []).slice(1); // skip header
+    const cfg = { ...CONFIG_DEFAULTS };
+    rows.forEach(r => { if (r[0] && r[1] !== undefined) cfg[r[0].trim()] = r[1].trim(); });
+    return cfg;
+  } catch(e) {
+    console.warn('Config sheet unreachable — using defaults:', e.message);
+    return { ...CONFIG_DEFAULTS };
+  }
+}
+
+function parseConfig(raw) {
+  return {
+    // Auth
+    adminEmails: raw.admin_emails.split(',').map(e => e.trim()).filter(Boolean),
+
+    // Sheet IDs per app
+    labelingSheetId:    raw.labeling_sheet_id,
+    assessmentSheetId:  raw.assessment_sheet_id,
+    consensusSheetId:   raw.consensus_sheet_id,
+
+    // Assessment
+    assessmentVersion:      raw.assessment_version,
+    assessmentGoldTab:      raw.assessment_gold_tab,
+    assessmentPassingScore: parseInt(raw.assessment_passing_score) || 70,
+
+    // Consensus
+    consensusSampleSize:        parseInt(raw.consensus_sample_size) || 774,
+    consensusFlagThreshold:     parseInt(raw.consensus_flag_threshold) || 2,
+    consensusDeepDiveThreshold: parseInt(raw.consensus_deepdive_threshold) || 3,
+    consensusDeepDiveErrorRate: parseFloat(raw.consensus_deepdive_error_rate) || 0.25,
+  };
+}
+
+const CLIENT_ID = '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com';
+const SCOPES    = 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+let APP_CONFIG  = null;
+
+// CONFIG proxy — backward-compatible with all existing code
 let CONFIG = {
-  CLIENT_ID: '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com',
-  SHEET_ID: '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
-  ADMIN_EMAILS: ['ayush.siddhi@cloudfactory.com'],
-  SCOPES: 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file'
+  CLIENT_ID,
+  get SHEET_ID()      { return APP_CONFIG ? APP_CONFIG.labelingSheetId : '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U'; },
+  get ADMIN_EMAILS()  { return APP_CONFIG ? APP_CONFIG.adminEmails : ['ayush.siddhi@cloudfactory.com']; },
+  set ADMIN_EMAILS(v) { if (APP_CONFIG) APP_CONFIG.adminEmails = v; },
+  SCOPES,
 };
 
 // Sheet tab names
@@ -1101,20 +1173,14 @@ function formatSeconds(s) {
   return `${String(m).padStart(2,'0')}:${String(Math.floor(sec)).padStart(2,'0')}`;
 }
 
-function loadConfig() {
-  const saved = localStorage.getItem('cf_battery_config');
-  if (saved) {
-    try { CONFIG = { ...CONFIG, ...JSON.parse(saved) }; return true; } catch(e) {}
-  }
-  return false;
+async function loadConfig(accessToken) {
+  const raw = await loadRemoteConfig(accessToken);
+  APP_CONFIG = parseConfig(raw);
 }
 
 function saveConfig() {
-  localStorage.setItem('cf_battery_config', JSON.stringify({
-    CLIENT_ID: CONFIG.CLIENT_ID,
-    SHEET_ID: CONFIG.SHEET_ID,
-    ADMIN_EMAILS: CONFIG.ADMIN_EMAILS
-  }));
+  // Admin list changes are now written back to the config sheet
+  // This is a no-op kept for backward compatibility
 }
 
 // ═══════════════════════════════════════════════
@@ -1762,6 +1828,7 @@ function initTokenClient() {
         });
         const info = await res.json();
         if (!info.email) throw new Error('No email returned');
+        await loadConfig(resp.access_token);
         await signInUser(info.email, info.name || info.email);
       } catch(e) {
         console.error('Userinfo error:', e);
@@ -1779,6 +1846,7 @@ async function signInWithEmail(email) {
 
 async function signInUser(email, name) {
   state.user = { email, name };
+  // APP_CONFIG already loaded by token callback; isAdmin uses live config
   state.isAdmin = CONFIG.ADMIN_EMAILS.includes(email);
 
   document.getElementById('header-email').textContent = email;
