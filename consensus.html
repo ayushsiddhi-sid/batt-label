@@ -333,7 +333,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
 
 // The ONE hardcoded value across all apps — the config sheet ID.
 // This never changes. Everything else comes from the sheet.
-const CONFIG_SHEET_ID = '1axlYSB3d5H0tDO4M_UA73QmKUY60xkzTrUi2Wfz1cls';
+const CONFIG_SHEET_ID = '__CONFIG_SHEET_ID_PLACEHOLDER__';
 
 // Defaults — used if config sheet is unreachable or key is missing
 const CONFIG_DEFAULTS = {
@@ -1061,13 +1061,21 @@ function initTokenClient(){
       clearInterval(window._refreshInt);
       window._refreshInt=setInterval(async()=>{ try{ await refreshToken(); }catch(e){} },45*60*1000);
       if(state.user) return;
+      // Step 1: get user identity — hard failure if this fails
+      let info;
       try {
         const r=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:'Bearer '+resp.access_token}});
-        const info=await r.json();
-        if(!info.email) throw new Error('No email');
-        await loadConfig(resp.access_token);
-        await signInUser(info.email);
-      } catch(e){ showToast('Could not get user info','error'); }
+        info=await r.json();
+        if(!info.email) throw new Error('No email returned from Google');
+      } catch(e){ showToast('Could not get user info: '+e.message,'error'); return; }
+
+      // Step 2: load remote config — soft failure, falls back to defaults
+      try { await loadConfig(resp.access_token); }
+      catch(e){ console.warn('Config load failed, using defaults:', e.message); }
+
+      // Step 3: sign in
+      try { await signInUser(info.email); }
+      catch(e){ showToast('Sign-in error: '+e.message,'error'); }
     }
   });
 }
