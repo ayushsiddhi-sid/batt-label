@@ -1333,7 +1333,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
       // Queue consensus_tasks write
       const {goldEvUrl=''} = pending.find(([r])=>parseInt(r)===rn)?.[1]||{};
-      consensusWrites.push(sheetsUpdate(
+      consensusWrites.push(()=>sheetsUpdate(
         `${SHEETS.CONSENSUS}!T${rn}:AA${rn}`,
         [[gold, goldSub, goldLfp, state.user.email, goldEv, goldEvUrl, pass1Correct, pass2Correct]]
       ));
@@ -1341,20 +1341,27 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       // Queue tasks tab write
       if(p1RowNum){
         if(pass1Correct==='No'){
-          taskWrites.push(sheetsUpdate(`${SHEETS.TASKS}!B${p1RowNum}:F${p1RowNum}`,[[gold, goldSub, goldLfp, goldEv, goldEvUrl||'']]));
+          taskWrites.push(()=>sheetsUpdate(`${SHEETS.TASKS}!B${p1RowNum}:F${p1RowNum}`,[[gold, goldSub, goldLfp, goldEv, goldEvUrl||'']]));
           corrected++;
         } else {
-          taskWrites.push(sheetsUpdate(`${SHEETS.TASKS}!E${p1RowNum}:F${p1RowNum}`,[[goldEv, goldEvUrl||'']]));
+          taskWrites.push(()=>sheetsUpdate(`${SHEETS.TASKS}!E${p1RowNum}:F${p1RowNum}`,[[goldEv, goldEvUrl||'']]));
           evidenceOnly++;
         }
       }
     }
 
-    // Execute all writes in parallel batches
+    // Execute writes sequentially to avoid Google Sheets 429 rate limit
     setLoading(true, `Writing ${consensusWrites.length} consensus records…`);
-    await Promise.all(consensusWrites);
-    setLoading(true, `Updating ${taskWrites.length} master dataset rows…`);
-    await Promise.all(taskWrites);
+    for(let i=0; i<consensusWrites.length; i++){
+      setLoading(true, `Writing consensus record ${i+1} of ${consensusWrites.length}…`);
+      await consensusWrites[i]();
+      if(i < consensusWrites.length-1) await new Promise(r=>setTimeout(r,250));
+    }
+    for(let i=0; i<taskWrites.length; i++){
+      setLoading(true, `Updating master row ${i+1} of ${taskWrites.length}…`);
+      await taskWrites[i]();
+      if(i < taskWrites.length-1) await new Promise(r=>setTimeout(r,250));
+    }
 
     // Clear pending
     _pendingGold = {};
