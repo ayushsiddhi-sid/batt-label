@@ -336,8 +336,14 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
           <option value="pending">Gold not set</option>
           <option value="done">Gold set</option>
         </select>
-        <button class="btn-primary" id="btn-save-all-gold" onclick="saveAllGoldLabels()" style="display:none;white-space:nowrap">↑ Save all to master dataset</button>
       </div>
+    </div>
+    <!-- Save all button — always visible when there are staged changes -->
+    <div id="save-all-bar" style="display:none;background:var(--warn-dim);border:1px solid rgba(245,166,35,.3);border-radius:6px;padding:10px 16px;margin-bottom:16px;display:none;align-items:center;justify-content:space-between">
+      <span style="font-family:var(--mono);font-size:12px;color:var(--warn)" id="pending-count-bar">0 gold labels staged</span>
+      <button class="btn-primary" id="btn-save-all-gold" onclick="saveAllGoldLabels()" style="background:var(--warn);color:#0f0f0f;white-space:nowrap">↑ Save all to master dataset</button>
+    </div>
+    <div style="display:none"><!-- dummy close --></div>
     </div>
     <div id="dis-list"></div>
   </div>
@@ -1084,7 +1090,13 @@ function renderDisagreementCards(pairs){
     // Default gold sub/lfp from annotator answers if not yet set
     const effectiveGold = gold || p1Label || '';
     const goldSub = r[20] || (p2Sub||p1Sub||'');
-    const goldLfp = r[21] || (p2Lfp||p1Lfp||'');
+    // For LFP: if gold was previously set to Unknown, prefer pass-2's specific answer
+    const savedLfp = r[21]||'';
+    const goldLfp = (savedLfp && savedLfp.toLowerCase()!=='unknown') 
+      ? savedLfp 
+      : (p2Lfp && p2Lfp.toLowerCase()!=='unknown') ? p2Lfp 
+      : (p1Lfp && p1Lfp.toLowerCase()!=='unknown') ? p1Lfp 
+      : savedLfp;
     const goldBy  = (r[22]||'').split('@')[0];
     // Show sublabel whenever either annotator used Lithium
     const showSub = effectiveGold.toLowerCase()==='lithium' ||
@@ -1193,6 +1205,13 @@ function renderDisagreementCards(pairs){
       const m = raw.match(/HYPERLINK\("([^"]+)"/);
       goldEvUrlEl.value = m ? m[1] : (raw.startsWith('http') ? raw : '');
     }
+    // Re-apply staged visual state if this card was already staged
+    if(_pendingGold[pair.rowNum]){
+      const sb = document.getElementById('stage-btn-'+i);
+      const ss = document.getElementById('stage-status-'+i);
+      if(sb){ sb.textContent='✓ Staged'; sb.style.borderColor='var(--accent)'; sb.style.color='var(--accent)'; }
+      if(ss) ss.textContent='staged';
+    }
   });
 }
 
@@ -1238,10 +1257,14 @@ function stageGoldLabel(rowNum, batteryId, idx){
 
   // Update pending count
   const count = Object.keys(_pendingGold).length;
-  const countEl = document.getElementById('pending-count');
-  const saveBtn = document.getElementById('btn-save-all-gold');
-  if(countEl){ countEl.textContent = count+' staged'; countEl.style.display=''; }
-  if(saveBtn){ saveBtn.style.display=''; saveBtn.textContent=`↑ Save ${count} to master dataset`; }
+  const countEl    = document.getElementById('pending-count');
+  const countBarEl = document.getElementById('pending-count-bar');
+  const saveBar    = document.getElementById('save-all-bar');
+  const saveBtn    = document.getElementById('btn-save-all-gold');
+  if(countEl){ countEl.textContent=count+' staged'; countEl.style.display=''; }
+  if(countBarEl) countBarEl.textContent = count+' gold label'+(count===1?'':'s')+' staged — not yet saved';
+  if(saveBar){ saveBar.style.display='flex'; }
+  if(saveBtn) saveBtn.textContent = `↑ Save ${count} to master dataset`;
   showToast(`Staged — ${count} total pending`);
 }
 
@@ -1313,10 +1336,11 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
     // Clear pending
     _pendingGold = {};
-    const countEl = document.getElementById('pending-count');
-    const saveBtn = document.getElementById('btn-save-all-gold');
-    if(countEl) countEl.style.display='none';
-    if(saveBtn) saveBtn.style.display='none';
+    const countEl    = document.getElementById('pending-count');
+    const saveBar    = document.getElementById('save-all-bar');
+    const saveBtn    = document.getElementById('btn-save-all-gold');
+    if(countEl)  countEl.style.display='none';
+    if(saveBar)  saveBar.style.display='none';
 
     showToast(`✓ Saved — ${corrected} labels corrected, ${evidenceOnly} evidence updated`);
     await loadAdminDashboard();
