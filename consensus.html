@@ -1349,7 +1349,7 @@ function renderDisagreementCards(pairs){
   }).join('');
 
   // Populate pass-1 evidence after render
-  pairs.forEach(({r, batteryId}, i) => {
+  pairs.forEach(({r, batteryId, rowNum}, i) => {
     const el = document.getElementById('p1ev-'+i);
     if(!el) return;
     const ev = _p1EvidenceMap[batteryId] || {};
