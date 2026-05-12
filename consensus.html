@@ -1021,7 +1021,8 @@ let _p1EvidenceMap={};
 function renderDisagreements(rows, p1EvidenceMap={}){
   const dis=rows.filter(r=>r[18]==='disagree');
 
-  // Store for filtering
+  // Store globally for filtering and post-render evidence population
+  _p1EvidenceMap = p1EvidenceMap;
   _allDisPairs=dis.map(r=>({r, gold:r[19]||'', stratum:r[5]||'', batteryId:r[0]}));
 
   // Populate stratum filter
@@ -1112,10 +1113,7 @@ function renderDisagreementCards(pairs){
           ${p1Sub?`<div class="dis-field"><div class="dis-field-lbl">Sub-label</div><div class="dis-field-val ${subDiff?'diff':''}">${p1Sub}</div></div>`:''}
           ${p1Lfp?`<div class="dis-field"><div class="dis-field-lbl">LFP</div><div class="dis-field-val ${lfpDiff?'diff':''}">${p1Lfp}</div></div>`:''}
           <div class="dis-field"><div class="dis-field-lbl">Evidence</div>
-            <div style="font-size:12px;color:var(--text-muted);line-height:1.5;white-space:normal;max-width:400px">
-              \${_p1EvidenceMap[batteryId]?.evidence||'<span style="color:var(--text-dim)">—</span>'}
-              \${_p1EvidenceMap[batteryId]?.evidenceUrl?`<a href="\${_p1EvidenceMap[batteryId].evidenceUrl.replace(/=HYPERLINK\\("([^"]+)".*/,'$1')}" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono);margin-left:4px">↗ link</a>`:''}
-            </div></div>
+            <div style="font-size:12px;color:var(--text-muted);line-height:1.5;white-space:normal;max-width:400px" id="p1ev-${i}"></div></div>
         </div>
         <div class="dis-col">
           <div class="dis-col-label"><span class="badge badge-yellow" style="font-size:9px">PASS 2</span><span style="font-size:11px;color:var(--text-dim)">${p2Annot}</span></div>
@@ -1143,6 +1141,25 @@ function renderDisagreementCards(pairs){
       </div>
     </div>`;
   }).join('');
+
+  // Populate pass-1 evidence after render
+  pairs.forEach(({r, batteryId}, i) => {
+    const el = document.getElementById('p1ev-'+i);
+    if(!el) return;
+    const ev = _p1EvidenceMap[batteryId] || {};
+    let html = ev.evidence || '<span style="color:var(--text-dim)">—</span>';
+    if(ev.evidenceUrl){
+      const url = ev.evidenceUrl.replace(/=HYPERLINK\("([^"]+)".*/,'$1');
+      html += ' <a href="'+url+'" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono)">↗ link</a>';
+    }
+    el.innerHTML = html;
+
+    // Also populate gold evidence textarea with correct annotator evidence
+    const goldEvEl = document.getElementById('gold-ev-'+i);
+    if(goldEvEl && !goldEvEl.value) {
+      goldEvEl.value = ev.evidence || '';
+    }
+  });
 }
 
 function goldLabelChanged(idx){
