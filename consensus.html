@@ -437,6 +437,9 @@ function parseConfig(raw) {
 }
 
 const CLIENT_ID = '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com';
+// Fallback reviewer list — used if config sheet is unreachable
+// Update this AND the config sheet when adding/removing reviewers
+const REVIEWER_EMAILS_FALLBACK = [];
 const SCOPES    = 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly';
 let APP_CONFIG  = null;
 
@@ -445,7 +448,7 @@ const CONFIG = {
   get SHEET_ID()              { return APP_CONFIG ? APP_CONFIG.consensusSheetId : '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U'; },
   get ADMIN_EMAILS()          { return APP_CONFIG ? APP_CONFIG.adminEmails : ['ayush.siddhi@cloudfactory.com']; },
   set ADMIN_EMAILS(v)         { if (APP_CONFIG) APP_CONFIG.adminEmails = v; },
-  get REVIEWER_EMAILS()       { return APP_CONFIG ? APP_CONFIG.reviewerEmails : []; },
+  get REVIEWER_EMAILS()       { return APP_CONFIG ? APP_CONFIG.reviewerEmails : REVIEWER_EMAILS_FALLBACK; },
   get FLAG_THRESHOLD()        { return APP_CONFIG ? APP_CONFIG.consensusFlagThreshold : 2; },
   get DEEPDIVE_THRESHOLD()    { return APP_CONFIG ? APP_CONFIG.consensusDeepDiveThreshold : 3; },
   get DEEPDIVE_ERROR_RATE()   { return APP_CONFIG ? APP_CONFIG.consensusDeepDiveErrorRate : 0.25; },
