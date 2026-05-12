@@ -371,7 +371,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
 
 // The ONE hardcoded value across all apps — the config sheet ID.
 // This never changes. Everything else comes from the sheet.
-const CONFIG_SHEET_ID = '1axlYSB3d5H0tDO4M_UA73QmKUY60xkzTrUi2Wfz1cls';
+const CONFIG_SHEET_ID = '__CONFIG_SHEET_ID_PLACEHOLDER__';
 
 // Defaults — used if config sheet is unreachable or key is missing
 const CONFIG_DEFAULTS = {
@@ -922,8 +922,17 @@ async function loadAdminDashboard(){
       .map(r=>{ while(r.length<27) r.push(''); return r; });
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
     // Build pass-1 evidence lookup: battery_id → {evidence, evidenceUrl}
+    // Key by battery_id — prefer rows with actual evidence content
     const p1EvidenceMap={};
-    (tData.values||[]).slice(1).forEach(r=>{ if(r[0]) p1EvidenceMap[r[0]]={evidence:r[4]||'',evidenceUrl:r[5]||''}; });
+    (tData.values||[]).slice(1).forEach(r=>{
+      if(!r[0]) return;
+      const existing = p1EvidenceMap[r[0]];
+      const hasEvidence = (r[4]||'').trim().length > 0;
+      // Only overwrite if new row has evidence and existing doesn't
+      if(!existing || (!existing.evidence && hasEvidence)){
+        p1EvidenceMap[r[0]] = {evidence:r[4]||'', evidenceUrl:r[5]||''};
+      }
+    });
 
     const seeded=cRows.length;
     const completed=cRows.filter(r=>r[8]==='complete').length;
@@ -1124,11 +1133,12 @@ function renderDisagreementCards(pairs){
       goldSub.toLowerCase()===(p1Sub||'').toLowerCase() &&
       goldLfp.toLowerCase()===(p1Lfp||'').toLowerCase()
     );
-    // Pre-fill evidence: from saved gold evidence, or correct annotator's evidence
+    // Pre-fill evidence: saved gold → pass-1 evidence (from tasks tab) → pass-2 evidence
     const savedGoldEv    = r[23]||'';
     const savedGoldEvUrl = r[24]||'';
-    const goldEvidence    = savedGoldEv || (p2Ev !== '—' ? p2Ev : '');
-    const goldEvidenceUrl = savedGoldEvUrl || (p2EvUrl||'');
+    const p1EvData       = _p1EvidenceMap ? (_p1EvidenceMap[r[0]]||{}) : {};
+    const goldEvidence    = savedGoldEv || p1EvData.evidence || (p2Ev !== '—' ? p2Ev : '');
+    const goldEvidenceUrl = savedGoldEvUrl || p1EvData.evidenceUrl || (p2EvUrl||'');
     const subOpts = ['','Li-ion','Li Primary','Solid-state','Unknown'].map(v=>`<option value="${v}" ${goldSub===v?'selected':''}>${v||'Sub-label…'}</option>`).join('');
     const lfpOpts = ['','Yes','No','Unknown'].map(v=>`<option value="${v}" ${goldLfp===v?'selected':''}>${v||'LFP?'}</option>`).join('');
     const labelDiff=p1Label.toLowerCase()!==p2Label.toLowerCase();
