@@ -1352,15 +1352,27 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
     // Execute writes sequentially to avoid Google Sheets 429 rate limit
     setLoading(true, `Writing ${consensusWrites.length} consensus records…`);
+    async function writeWithRetry(fn, label){
+      for(let attempt=0; attempt<4; attempt++){
+        try { await fn(); return; }
+        catch(e){
+          if(e.message.includes('429') && attempt<3){
+            const wait = 2000 * (attempt+1); // 2s, 4s, 6s backoff
+            setLoading(true, `Rate limited — waiting ${wait/1000}s before retry…`);
+            await new Promise(r=>setTimeout(r,wait));
+          } else throw e;
+        }
+      }
+    }
     for(let i=0; i<consensusWrites.length; i++){
       setLoading(true, `Writing consensus record ${i+1} of ${consensusWrites.length}…`);
-      await consensusWrites[i]();
-      if(i < consensusWrites.length-1) await new Promise(r=>setTimeout(r,250));
+      await writeWithRetry(consensusWrites[i], `consensus ${i+1}`);
+      await new Promise(r=>setTimeout(r,500));
     }
     for(let i=0; i<taskWrites.length; i++){
       setLoading(true, `Updating master row ${i+1} of ${taskWrites.length}…`);
-      await taskWrites[i]();
-      if(i < taskWrites.length-1) await new Promise(r=>setTimeout(r,250));
+      await writeWithRetry(taskWrites[i], `task ${i+1}`);
+      await new Promise(r=>setTimeout(r,500));
     }
 
     // Clear pending
