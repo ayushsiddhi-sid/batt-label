@@ -456,7 +456,7 @@ const SHEETS = { TASKS:'tasks', CONSENSUS:'consensus_tasks', ANN:'consensus_anno
 // pass1_row(6) assigned_to(7) status(8) assigned_at(9)
 // label(10) sublabel(11) lfp(12) evidence(13) evidence_url(14)
 // text_logo_visible(15) submitted_at(16) time_taken_seconds(17)
-// consensus_status(18) gold_label(19) gold_sublabel(20) gold_lfp(21) gold_set_by(22) gold_evidence(23) pass1_correct(24) pass2_correct(25)
+// consensus_status(18) gold_label(19) gold_sublabel(20) gold_lfp(21) gold_set_by(22) gold_evidence(23) gold_evidence_url(24) pass1_correct(25) pass2_correct(26)
 
 const STRATA_POOLS = {
   'Lithium — Li-ion LFP unknown':3365,'Lithium — Li-ion non-LFP':2945,
@@ -637,7 +637,7 @@ async function seedConsensusQueue(){
       'battery_id','original_label','original_sublabel','original_lfp','original_annotator',
       'stratum','pass1_row','assigned_to','status','assigned_at',
       'label','sublabel','lfp','evidence','evidence_url','text_logo_visible',
-      'submitted_at','time_taken_seconds','consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by','pass1_correct','pass2_correct'
+      'submitted_at','time_taken_seconds','consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by','gold_evidence','gold_evidence_url','pass1_correct','pass2_correct'
     ]);
     await ensureSheet(SHEETS.ANN,[
       'email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss'
@@ -901,7 +901,7 @@ async function loadAdminDashboard(){
     ]);
     const cRows=(cData.values||[]).slice(1)
       .filter(r=>r[0])
-      .map(r=>{ while(r.length<25) r.push(''); return r; });
+      .map(r=>{ while(r.length<27) r.push(''); return r; });
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
     // Build pass-1 evidence lookup: battery_id → {evidence, evidenceUrl}
     const p1EvidenceMap={};
@@ -1101,8 +1101,10 @@ function renderDisagreementCards(pairs){
       goldLfp.toLowerCase()===(p1Lfp||'').toLowerCase()
     );
     // Pre-fill evidence: from saved gold evidence, or correct annotator's evidence
-    const savedGoldEv = r[23]||'';
-    const goldEvidence = savedGoldEv || (p2Ev !== '—' ? p2Ev : '');
+    const savedGoldEv    = r[23]||'';
+    const savedGoldEvUrl = r[24]||'';
+    const goldEvidence    = savedGoldEv || (p2Ev !== '—' ? p2Ev : '');
+    const goldEvidenceUrl = savedGoldEvUrl || (p2EvUrl||'');
     const subOpts = ['','Li-ion','Li Primary','Solid-state','Unknown'].map(v=>`<option value="${v}" ${goldSub===v?'selected':''}>${v||'Sub-label…'}</option>`).join('');
     const lfpOpts = ['','Yes','No','Unknown'].map(v=>`<option value="${v}" ${goldLfp===v?'selected':''}>${v||'LFP?'}</option>`).join('');
     const labelDiff=p1Label.toLowerCase()!==p2Label.toLowerCase();
@@ -1154,6 +1156,10 @@ function renderDisagreementCards(pairs){
           <textarea id="gold-ev-${i}" style="flex:1;font-size:12px;padding:6px 8px;min-height:60px;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:3px;font-family:var(--sans)" placeholder="Evidence supporting the gold label…">${goldEvidence}</textarea>
         </div>
         <div class="gold-form-row">
+          <label style="white-space:nowrap">Evidence URL:</label>
+          <input type="text" id="gold-ev-url-${i}" style="flex:1;font-size:12px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:3px" placeholder="https://… (optional)" value="${goldEvidenceUrl}" />
+        </div>
+        <div class="gold-form-row">
           <button class="btn-secondary" onclick="stageGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px" id="stage-btn-${i}">✓ Stage gold</button>
           <span id="stage-status-${i}" style="font-family:var(--mono);font-size:10px;color:var(--accent)"></span>
           ${goldBy?`<span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-left:4px">previously saved by ${goldBy}</span>`:''}
@@ -1178,10 +1184,14 @@ function renderDisagreementCards(pairs){
     }
     el.innerHTML = html;
 
-    // Also populate gold evidence textarea with correct annotator evidence
+    // Also populate gold evidence textarea + URL with correct annotator evidence
     const goldEvEl = document.getElementById('gold-ev-'+i);
-    if(goldEvEl && !goldEvEl.value) {
-      goldEvEl.value = ev.evidence || '';
+    if(goldEvEl && !goldEvEl.value) goldEvEl.value = ev.evidence || '';
+    const goldEvUrlEl = document.getElementById('gold-ev-url-'+i);
+    if(goldEvUrlEl && !goldEvUrlEl.value && ev.evidenceUrl){
+      const raw = String(ev.evidenceUrl);
+      const m = raw.match(/HYPERLINK\("([^"]+)"/);
+      goldEvUrlEl.value = m ? m[1] : (raw.startsWith('http') ? raw : '');
     }
   });
 }
@@ -1211,13 +1221,14 @@ function stageGoldLabel(rowNum, batteryId, idx){
   const gold    = document.getElementById(`gold-lbl-${idx}`).value;
   const goldSub = document.getElementById(`gold-sub-${idx}`).value || '';
   const goldLfp = document.getElementById(`gold-lfp-${idx}`).value || '';
-  const goldEv  = document.getElementById(`gold-ev-${idx}`).value.trim();
+  const goldEv    = document.getElementById(`gold-ev-${idx}`).value.trim();
+  const goldEvUrl = document.getElementById(`gold-ev-url-${idx}`)?.value.trim()||'';
   if(!gold){ showToast('Select a label first','error'); return; }
   if(gold==='Lithium'&&!goldSub){ showToast('Select a sub-label for Lithium','error'); return; }
   if(!goldEv){ showToast('Evidence is required','error'); return; }
 
   // Store locally
-  _pendingGold[rowNum] = {gold, goldSub, goldLfp, goldEv, batteryId, idx};
+  _pendingGold[rowNum] = {gold, goldSub, goldLfp, goldEv, goldEvUrl, batteryId, idx};
 
   // Update UI
   const btn = document.getElementById(`stage-btn-${idx}`);
@@ -1276,18 +1287,19 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       const pass2Correct = p2Label===gL && p2Sub===gS && p2Lfp===gF ? 'Yes' : 'No';
 
       // Queue consensus_tasks write
+      const {goldEvUrl=''} = pending.find(([r])=>parseInt(r)===rn)?.[1]||{};
       consensusWrites.push(sheetsUpdate(
-        `${SHEETS.CONSENSUS}!T${rn}:Z${rn}`,
-        [[gold, goldSub, goldLfp, state.user.email, goldEv, pass1Correct, pass2Correct]]
+        `${SHEETS.CONSENSUS}!T${rn}:AA${rn}`,
+        [[gold, goldSub, goldLfp, state.user.email, goldEv, goldEvUrl, pass1Correct, pass2Correct]]
       ));
 
       // Queue tasks tab write
       if(p1RowNum){
         if(pass1Correct==='No'){
-          taskWrites.push(sheetsUpdate(`${SHEETS.TASKS}!B${p1RowNum}:E${p1RowNum}`,[[gold, goldSub, goldLfp, goldEv]]));
+          taskWrites.push(sheetsUpdate(`${SHEETS.TASKS}!B${p1RowNum}:F${p1RowNum}`,[[gold, goldSub, goldLfp, goldEv, goldEvUrl||'']]));
           corrected++;
         } else {
-          taskWrites.push(sheetsUpdate(`${SHEETS.TASKS}!E${p1RowNum}`,[[goldEv]]));
+          taskWrites.push(sheetsUpdate(`${SHEETS.TASKS}!E${p1RowNum}:F${p1RowNum}`,[[goldEv, goldEvUrl||'']]));
           evidenceOnly++;
         }
       }
