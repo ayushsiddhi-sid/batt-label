@@ -1241,18 +1241,6 @@ async function setGoldLabel(rowNum, batteryId, idx){
   setLoading(false);
 }
 
-// ── Filter disagreements by stratum and gold status ──
-function filterDisagreements(){
-  const strFilter  = document.getElementById('dis-filter').value;
-  const goldFilter = document.getElementById('dis-filter-gold').value;
-  const filtered = _allDisPairs.filter(({p1, p2, stratum, gold}) => {
-    if(strFilter && stratum !== strFilter) return false;
-    if(goldFilter==='pending' && gold) return false;
-    if(goldFilter==='done' && !gold) return false;
-    return true;
-  });
-  renderDisagreementCards(filtered);
-}
 
 // ═══════════════════════════════════════════════════════════════
 // EXPORT
