@@ -270,6 +270,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     <h2>Consensus Dashboard</h2>
     <div class="admin-btn-row">
       <button class="btn-secondary" id="btn-refresh">↻ Refresh</button>
+      <button class="btn-secondary" id="btn-add-tasks">+ Add tasks</button>
       <button class="btn-secondary" id="btn-export">↓ Export</button>
       <button class="btn-primary" id="btn-back-to-task" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)">← Back to tasks</button>
     </div>
@@ -282,6 +283,20 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
       <p>Reads the <code>tasks</code> tab, draws a stratified sample of <strong>774 tasks</strong> (±3.5% margin, 95% CI), and writes them to the <code>consensus_tasks</code> tab. Safe to re-run — already-seeded battery IDs are skipped.</p>
     </div>
     <button class="btn-primary" id="btn-seed" style="white-space:nowrap;flex-shrink:0;background:var(--warn);color:#0f0f0f">⚑ Run seed</button>
+  </div>
+
+  <!-- Add specific tasks panel -->
+  <div id="add-tasks-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:20px;margin-bottom:24px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <span style="font-family:var(--mono);font-size:12px;font-weight:600;color:var(--text)">Add specific tasks to consensus queue</span>
+      <button class="btn-ghost" id="btn-close-add-tasks" style="display:inline-block;padding:3px 10px;font-size:10px">✕ Close</button>
+    </div>
+    <p style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:12px">Paste battery IDs (one per line). The app will look them up in the tasks tab and add them to the consensus queue. Already-queued IDs are skipped.</p>
+    <textarea id="add-tasks-input" style="width:100%;height:120px;font-family:var(--mono);font-size:12px;padding:8px;background:var(--surface2);border:1px solid var(--border);color:var(--text);border-radius:3px;resize:vertical" placeholder="L1-20260507-014489&#10;L1-20260507-014490&#10;L1-20260507-014491"></textarea>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+      <button class="btn-primary" id="btn-add-tasks-submit">+ Add to queue</button>
+      <span id="add-tasks-status" style="font-family:var(--mono);font-size:11px;color:var(--text-muted)"></span>
+    </div>
   </div>
 
   <div class="stats-grid">
@@ -1087,6 +1102,100 @@ function renderDisagreements(rows, p1EvidenceMap={}){
   renderDisagreementCards(_allDisPairs);
 }
 
+async function addSpecificTasks(){
+  const input = document.getElementById('add-tasks-input').value.trim();
+  const statusEl = document.getElementById('add-tasks-status');
+  if(!input){ showToast('Paste some battery IDs first','error'); return; }
+
+  const batteryIds = [...new Set(input.split('\n').map(s=>s.trim()).filter(Boolean))];
+  statusEl.textContent = `Looking up ${batteryIds.length} battery IDs…`;
+
+  setLoading(true, 'Reading tasks tab…');
+  try {
+    // Read tasks tab to find matching rows
+    const tData = await sheetsGet(`${SHEETS.TASKS}!A:N`);
+    const tRows = (tData.values||[]).slice(1).map((r,i)=>({r, sheetRow:i+2}));
+
+    // Read existing consensus queue to check for already-queued IDs
+    const cData = await sheetsGet(`${SHEETS.CONSENSUS}!A:A`);
+    const queued = new Set((cData.values||[]).slice(1).map(r=>r[0]).filter(Boolean));
+
+    // Match battery IDs
+    const toAdd = [];
+    const notFound = [];
+    const alreadyQueued = [];
+
+    for(const bid of batteryIds){
+      if(queued.has(bid)){ alreadyQueued.push(bid); continue; }
+      // Find in tasks tab — prefer completed rows with evidence
+      const matches = tRows.filter(({r})=>r[0]===bid && r[9]==='complete');
+      if(!matches.length){ notFound.push(bid); continue; }
+      // Pick the one with the most evidence
+      const best = matches.sort((a,b)=>(b.r[4]||'').length-(a.r[4]||'').length)[0];
+      const {r, sheetRow} = best;
+
+      // Determine stratum
+      function getStratum(r){
+        const label=r[1], sub=r[2]||'', lfp=r[3]||'';
+        if(label==='Data Error') return 'Data Error';
+        if(label==='NiCd') return 'NiCd';
+        if(label==='NiMH') return 'NiMH';
+        if(label==='Lead') return 'Lead';
+        if(label==='Alkaline') return 'Alkaline';
+        if(label==='Zinc-Carbon') return 'Zinc-Carbon';
+        if(label==='Mercury') return 'Mercury';
+        if(label==='Unknown') return 'Unknown';
+        if(label==='Lithium'){
+          if(sub==='Li-ion'&&lfp==='Yes') return 'Lithium — Li-ion LFP';
+          if(sub==='Li-ion'&&lfp==='No')  return 'Lithium — Li-ion non-LFP';
+          if(sub==='Li-ion')              return 'Lithium — Li-ion LFP unknown';
+          if(sub==='Li Primary')          return 'Lithium — Li Primary';
+          return 'Lithium — sublabel unknown';
+        }
+        return label||'Unknown';
+      }
+
+      toAdd.push([
+        r[0],           // battery_id
+        r[1]||'',       // original_label
+        r[2]||'',       // original_sublabel
+        r[3]||'',       // original_lfp
+        r[8]||'',       // original_annotator
+        getStratum(r),  // stratum
+        sheetRow,       // pass1_row
+        '','unassigned','',
+        '','','','','','',
+        '','',
+        '','','','','',''
+      ]);
+    }
+
+    if(toAdd.length){
+      setLoading(true, `Adding ${toAdd.length} tasks to queue…`);
+      const BATCH=50;
+      for(let i=0;i<toAdd.length;i+=BATCH){
+        await sheetsAppend(`${SHEETS.CONSENSUS}!A:W`, toAdd.slice(i,i+BATCH));
+        if(i+BATCH<toAdd.length) await new Promise(r=>setTimeout(r,300));
+      }
+    }
+
+    const parts = [];
+    if(toAdd.length) parts.push(`✓ ${toAdd.length} added`);
+    if(alreadyQueued.length) parts.push(`${alreadyQueued.length} already in queue`);
+    if(notFound.length) parts.push(`${notFound.length} not found: ${notFound.slice(0,3).join(', ')}${notFound.length>3?'…':''}`);
+    statusEl.textContent = parts.join(' · ');
+    if(toAdd.length) showToast(`Added ${toAdd.length} tasks to consensus queue`);
+
+    document.getElementById('add-tasks-input').value='';
+    await loadAdminDashboard();
+  } catch(e){
+    showToast('Error: '+e.message,'error');
+    statusEl.textContent = 'Failed: '+e.message;
+    console.error(e);
+  }
+  setLoading(false);
+}
+
 function restoreFromBackup(){
   const json = document.getElementById('restore-json').value.trim();
   if(!json){ showToast('Paste your backup JSON first','error'); return; }
@@ -1346,7 +1455,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
     let consensusWrites = [];
     let taskWrites = [];
-    let corrected = 0, evidenceOnly = 0;
+    let corrected = 0, evidenceOnly = 0, skipped = 0;
 
     for(const [rowNum, {gold, goldSub, goldLfp, goldEv, batteryId}] of pending){
       const rn = parseInt(rowNum);
@@ -1384,6 +1493,10 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
           taskWrites.push(()=>sheetsUpdate(`${SHEETS.TASKS}!E${p1RowNum}:F${p1RowNum}`,[[goldEv, goldEvUrl||'']]));
           evidenceOnly++;
         }
+      } else {
+        // No pass1_row — consensus record still saved, tasks tab can't be updated
+        console.warn('No pass1_row for battery:', batteryId, '— gold saved to consensus only');
+        skipped++;
       }
     }
 
@@ -1420,7 +1533,8 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     if(countEl)  countEl.style.display='none';
     if(saveBar)  saveBar.style.display='none';
 
-    showToast(`✓ Saved — ${corrected} labels corrected, ${evidenceOnly} evidence updated`);
+    const skipMsg = skipped > 0 ? `, ${skipped} saved to consensus only (no source row)` : '';
+    showToast(`✓ Saved — ${corrected} labels corrected, ${evidenceOnly} evidence updated${skipMsg}`);
     await loadAdminDashboard();
   } catch(e){
     showToast('Save failed: '+e.message,'error');
@@ -1706,6 +1820,17 @@ document.addEventListener('DOMContentLoaded',()=>{
     else showToast('Admin access required','error');
   });
   document.getElementById('btn-refresh').addEventListener('click',loadAdminDashboard);
+  document.getElementById('btn-add-tasks').addEventListener('click',()=>{
+    const p=document.getElementById('add-tasks-panel');
+    p.style.display=p.style.display==='none'?'block':'none';
+  });
+  document.getElementById('btn-close-add-tasks').addEventListener('click',()=>{
+    document.getElementById('add-tasks-panel').style.display='none';
+  });
+  document.getElementById('btn-add-tasks-submit').addEventListener('click',addSpecificTasks);
+  document.getElementById('add-tasks-input').addEventListener('keydown',(e)=>{
+    if(e.ctrlKey&&e.key==='Enter') addSpecificTasks();
+  });
   document.getElementById('btn-export').addEventListener('click',exportResults);
   document.getElementById('btn-seed').addEventListener('click',seedConsensusQueue);
 });
