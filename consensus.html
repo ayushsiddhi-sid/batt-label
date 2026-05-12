@@ -112,7 +112,8 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .dis-field-lbl{font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:2px}
 .dis-field-val{font-size:13px}
 .dis-field-val.diff{color:var(--warn);font-weight:600}
-.gold-form{padding:12px 16px;background:var(--surface2);border-top:1px solid var(--border);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.gold-form{padding:12px 16px;background:var(--surface2);border-top:1px solid var(--border);display:flex;flex-direction:column;gap:10px}
+.gold-form-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .gold-form label{font-family:var(--mono);font-size:10px;color:var(--text-muted)}
 .gold-form select{width:160px;font-size:12px;padding:5px 8px}
 .gold-form button{padding:5px 14px;font-size:11px}
@@ -320,7 +321,20 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
 
   <!-- Disagreements tab -->
   <div id="pane-disagree" style="display:none">
-    <div class="section-title">Set gold standard label for each disagreement — used to determine which annotator was wrong</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <div style="font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-muted)">Set gold standard — saves to master dataset</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <label style="font-family:var(--mono);font-size:10px;color:var(--text-muted)">Stratum:</label>
+        <select id="dis-filter" onchange="filterDisagreements()" style="font-size:12px;padding:4px 8px;width:220px">
+          <option value="">All strata</option>
+        </select>
+        <select id="dis-filter-gold" onchange="filterDisagreements()" style="font-size:12px;padding:4px 8px;width:150px">
+          <option value="">All</option>
+          <option value="pending">Gold not set</option>
+          <option value="done">Gold set</option>
+        </select>
+      </div>
+    </div>
     <div id="dis-list"></div>
   </div>
 </div>
@@ -435,7 +449,7 @@ const SHEETS = { TASKS:'tasks', CONSENSUS:'consensus_tasks', ANN:'consensus_anno
 // pass1_row(6) assigned_to(7) status(8) assigned_at(9)
 // label(10) sublabel(11) lfp(12) evidence(13) evidence_url(14)
 // text_logo_visible(15) submitted_at(16) time_taken_seconds(17)
-// consensus_status(18) gold_label(19) gold_sublabel(20) gold_lfp(21) gold_set_by(22)
+// consensus_status(18) gold_label(19) gold_sublabel(20) gold_lfp(21) gold_set_by(22) gold_evidence(23) pass1_correct(24) pass2_correct(25)
 
 const STRATA_POOLS = {
   'Lithium — Li-ion LFP unknown':3365,'Lithium — Li-ion non-LFP':2945,
@@ -616,7 +630,7 @@ async function seedConsensusQueue(){
       'battery_id','original_label','original_sublabel','original_lfp','original_annotator',
       'stratum','pass1_row','assigned_to','status','assigned_at',
       'label','sublabel','lfp','evidence','evidence_url','text_logo_visible',
-      'submitted_at','time_taken_seconds','consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by'
+      'submitted_at','time_taken_seconds','consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by','pass1_correct','pass2_correct'
     ]);
     await ensureSheet(SHEETS.ANN,[
       'email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss'
@@ -864,15 +878,18 @@ async function loadNextTask(){
 async function loadAdminDashboard(){
   setLoading(true,'Loading dashboard…');
   try {
-    const [cData,aData]=await Promise.all([
+    const [cData,aData,tData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:W`),
-      sheetsGet(`${SHEETS.ANN}!A:J`)
+      sheetsGet(`${SHEETS.ANN}!A:J`),
+      sheetsGet(`${SHEETS.TASKS}!A:F`)
     ]);
-    // Pad all rows to 21 cols so r[8], r[18] etc are never undefined
     const cRows=(cData.values||[]).slice(1)
       .filter(r=>r[0])
-      .map(r=>{ while(r.length<23) r.push(''); return r; });
+      .map(r=>{ while(r.length<25) r.push(''); return r; });
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
+    // Build pass-1 evidence lookup: battery_id → {evidence, evidenceUrl}
+    const p1EvidenceMap={};
+    (tData.values||[]).slice(1).forEach(r=>{ if(r[0]) p1EvidenceMap[r[0]]={evidence:r[4]||'',evidenceUrl:r[5]||''}; });
 
     const seeded=cRows.length;
     const completed=cRows.filter(r=>r[8]==='complete').length;
@@ -908,7 +925,7 @@ async function loadAdminDashboard(){
     // CW performance
     renderCW(aRows, cRows);
     // Disagreements
-    renderDisagreements(cRows);
+    renderDisagreements(cRows, p1EvidenceMap);
 
   } catch(e){
     showToast('Dashboard error: '+e.message,'error');
@@ -998,8 +1015,38 @@ function renderCW(aRows, cRows){
   }).join('');
 }
 
-function renderDisagreements(rows){
+let _allDisPairs=[];
+let _p1EvidenceMap={};
+
+function renderDisagreements(rows, p1EvidenceMap={}){
   const dis=rows.filter(r=>r[18]==='disagree');
+
+  // Store for filtering
+  _allDisPairs=dis.map(r=>({r, gold:r[19]||'', stratum:r[5]||'', batteryId:r[0]}));
+
+  // Populate stratum filter
+  const sel=document.getElementById('dis-filter');
+  if(sel){
+    const strata=[...new Set(_allDisPairs.map(p=>p.stratum).filter(Boolean))].sort();
+    sel.innerHTML='<option value="">All strata</option>'+strata.map(s=>`<option value="${s}">${s}</option>`).join('');
+  }
+
+  renderDisagreementCards(_allDisPairs);
+}
+
+function filterDisagreements(){
+  const sf=(document.getElementById('dis-filter')||{}).value||'';
+  const gf=(document.getElementById('dis-filter-gold')||{}).value||'';
+  renderDisagreementCards(_allDisPairs.filter(p=>{
+    if(sf&&p.stratum!==sf) return false;
+    if(gf==='pending'&&p.gold) return false;
+    if(gf==='done'&&!p.gold) return false;
+    return true;
+  }));
+}
+
+function renderDisagreementCards(pairs){
+  const dis=pairs.map(p=>p.r);
   const container=document.getElementById('dis-list');
   if(dis.length===0){
     container.innerHTML=`<div style="padding:48px;text-align:center;color:var(--text-dim);font-family:var(--mono);font-size:13px">No disagreements yet</div>`;
@@ -1010,6 +1057,7 @@ function renderDisagreements(rows){
     const batteryId=r[0];
     const origAnnot=(r[4]||'—').split('@')[0];
     const p1Label=r[1]||'—', p1Sub=r[2]||'', p1Lfp=r[3]||'';
+    const p1Annot=(r[4]||'—').split('@')[0];
     const p2Label=r[10]||'—', p2Sub=r[11]||'', p2Lfp=r[12]||'';
     const p2Ev=r[13]||'—', p2Annot=(r[7]||'—').split('@')[0];
     const sameAnnotator = r[4] && r[7] && r[4].toLowerCase()===r[7].toLowerCase();
@@ -1027,6 +1075,17 @@ function renderDisagreements(rows){
                     p2Label.toLowerCase()==='lithium';
     // Show LFP whenever sublabel is Li-ion or Solid-state
     const showLfp = showSub && ['Li-ion','Solid-state','li-ion','solid-state'].includes(goldSub);
+
+    // Pre-fill evidence from correct annotator (pass-2 if they agree with gold, else pass-1)
+    // If gold not set yet, default to pass-2 evidence
+    const p1Correct = gold && (
+      gold.toLowerCase()===(p1Label||'').toLowerCase() &&
+      goldSub.toLowerCase()===(p1Sub||'').toLowerCase() &&
+      goldLfp.toLowerCase()===(p1Lfp||'').toLowerCase()
+    );
+    // Pre-fill evidence: from saved gold evidence, or correct annotator's evidence
+    const savedGoldEv = r[23]||'';
+    const goldEvidence = savedGoldEv || (p2Ev !== '—' ? p2Ev : '');
     const subOpts = ['','Li-ion','Li Primary','Solid-state','Unknown'].map(v=>`<option value="${v}" ${goldSub===v?'selected':''}>${v||'Sub-label…'}</option>`).join('');
     const lfpOpts = ['','Yes','No','Unknown'].map(v=>`<option value="${v}" ${goldLfp===v?'selected':''}>${v||'LFP?'}</option>`).join('');
     const labelDiff=p1Label.toLowerCase()!==p2Label.toLowerCase();
@@ -1052,6 +1111,11 @@ function renderDisagreements(rows){
           <div class="dis-field"><div class="dis-field-lbl">Label</div><div class="dis-field-val ${labelDiff?'diff':''}">${p1Label}</div></div>
           ${p1Sub?`<div class="dis-field"><div class="dis-field-lbl">Sub-label</div><div class="dis-field-val ${subDiff?'diff':''}">${p1Sub}</div></div>`:''}
           ${p1Lfp?`<div class="dis-field"><div class="dis-field-lbl">LFP</div><div class="dis-field-val ${lfpDiff?'diff':''}">${p1Lfp}</div></div>`:''}
+          <div class="dis-field"><div class="dis-field-lbl">Evidence</div>
+            <div style="font-size:12px;color:var(--text-muted);line-height:1.5;white-space:normal;max-width:400px">
+              \${_p1EvidenceMap[batteryId]?.evidence||'<span style="color:var(--text-dim)">—</span>'}
+              \${_p1EvidenceMap[batteryId]?.evidenceUrl?`<a href="\${_p1EvidenceMap[batteryId].evidenceUrl.replace(/=HYPERLINK\\("([^"]+)".*/,'$1')}" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono);margin-left:4px">↗ link</a>`:''}
+            </div></div>
         </div>
         <div class="dis-col">
           <div class="dis-col-label"><span class="badge badge-yellow" style="font-size:9px">PASS 2</span><span style="font-size:11px;color:var(--text-dim)">${p2Annot}</span></div>
@@ -1062,12 +1126,20 @@ function renderDisagreements(rows){
         </div>
       </div>
       <div class="gold-form">
-        <label>Gold label:</label>
-        <select id="gold-lbl-${i}" onchange="goldLabelChanged(${i})">${goldOpts}</select>
-        <select id="gold-sub-${i}" style="display:${showSub?'':'none'};width:120px" onchange="goldSubChanged(${i})">${subOpts}</select>
-        <select id="gold-lfp-${i}" style="display:${showLfp?'':'none'};width:90px">${lfpOpts}</select>
-        <button class="btn-secondary" onclick="setGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px">Save gold label</button>
-        ${goldBy?`<span style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">set by ${goldBy}</span>`:''}
+        <div class="gold-form-row">
+          <label>Gold label:</label>
+          <select id="gold-lbl-${i}" onchange="goldLabelChanged(${i})">${goldOpts}</select>
+          <select id="gold-sub-${i}" style="display:${showSub?'':'none'};width:120px" onchange="goldSubChanged(${i})">${subOpts}</select>
+          <select id="gold-lfp-${i}" style="display:${showLfp?'':'none'};width:90px">${lfpOpts}</select>
+        </div>
+        <div class="gold-form-row" style="align-items:flex-start">
+          <label style="margin-top:6px;white-space:nowrap">Gold evidence:</label>
+          <textarea id="gold-ev-${i}" style="flex:1;font-size:12px;padding:6px 8px;min-height:60px;resize:vertical;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:3px;font-family:var(--sans)" placeholder="Evidence supporting the gold label…">${goldEvidence}</textarea>
+        </div>
+        <div class="gold-form-row">
+          <button class="btn-primary" onclick="setGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px">Save &amp; update master dataset</button>
+          ${goldBy?`<span style="font-family:var(--mono);font-size:10px;color:var(--text-dim)">last saved by ${goldBy}</span>`:''}
+        </div>
       </div>
     </div>`;
   }).join('');
@@ -1094,19 +1166,78 @@ function goldSubChanged(idx){
 }
 
 async function setGoldLabel(rowNum, batteryId, idx){
-  const gold    = document.getElementById(`gold-lbl-${idx}`).value;
-  const goldSub = document.getElementById(`gold-sub-${idx}`).value || '';
-  const goldLfp = document.getElementById(`gold-lfp-${idx}`).value || '';
+  const gold     = document.getElementById(`gold-lbl-${idx}`).value;
+  const goldSub  = document.getElementById(`gold-sub-${idx}`).value || '';
+  const goldLfp  = document.getElementById(`gold-lfp-${idx}`).value || '';
+  const goldEv   = document.getElementById(`gold-ev-${idx}`).value.trim();
   if(!gold){ showToast('Select a label first','error'); return; }
-  if(gold==='Lithium' && !goldSub){ showToast('Select a sub-label for Lithium','error'); return; }
+  if(gold==='Lithium'&&!goldSub){ showToast('Select a sub-label for Lithium','error'); return; }
+  if(!goldEv){ showToast('Evidence is required','error'); return; }
+
+  setLoading(true,'Saving gold label…');
   try {
-    // T=gold_label U=gold_sublabel V=gold_lfp W=gold_set_by
-    await sheetsUpdate(`${SHEETS.CONSENSUS}!T${rowNum}:W${rowNum}`,[[gold, goldSub, goldLfp, state.user.email]]);
-    showToast(`Gold label saved for ${batteryId}`);
+    // Read the consensus row to get pass1_row and both annotator answers
+    const rowData = await sheetsGet(`${SHEETS.CONSENSUS}!A${rowNum}:S${rowNum}`);
+    const r = ((rowData.values||[[]])[0]||[]);
+    while(r.length<19) r.push('');
+
+    const p1RowNum  = parseInt(r[6]);   // source row in tasks tab
+    const p1Label   = (r[1]||'').trim().toLowerCase();
+    const p1Sub     = (r[2]||'').trim().toLowerCase();
+    const p1Lfp     = (r[3]||'').trim().toLowerCase();
+    const p2Label   = (r[10]||'').trim().toLowerCase();
+    const p2Sub     = (r[11]||'').trim().toLowerCase();
+    const p2Lfp     = (r[12]||'').trim().toLowerCase();
+
+    const gLower = gold.trim().toLowerCase();
+    const gSubL  = goldSub.trim().toLowerCase();
+    const gLfpL  = goldLfp.trim().toLowerCase();
+
+    const pass1Correct = p1Label===gLower && p1Sub===gSubL && p1Lfp===gLfpL ? 'Yes' : 'No';
+    const pass2Correct = p2Label===gLower && p2Sub===gSubL && p2Lfp===gLfpL ? 'Yes' : 'No';
+
+    // Write to consensus_tasks: T=gold_label U=gold_sublabel V=gold_lfp W=gold_set_by X=gold_evidence Y=pass1_correct Z=pass2_correct
+    await sheetsUpdate(`${SHEETS.CONSENSUS}!T${rowNum}:Z${rowNum}`,[[ 
+      gold, goldSub, goldLfp, state.user.email, goldEv, pass1Correct, pass2Correct
+    ]]);
+
+    // Update master tasks tab if pass-1 was wrong and we have the source row
+    if(pass1Correct==='No' && p1RowNum){
+      await sheetsUpdate(`${SHEETS.TASKS}!B${p1RowNum}:E${p1RowNum}`,[[ 
+        gold, goldSub, goldLfp, goldEv
+      ]]);
+      showToast(`Gold saved — pass-1 label corrected in master dataset (row ${p1RowNum})`);
+    } else if(pass1Correct==='Yes') {
+      // Pass-1 was right — just update evidence if it was weak
+      if(p1RowNum && goldEv) {
+        await sheetsUpdate(`${SHEETS.TASKS}!E${p1RowNum}`,[[goldEv]]);
+      }
+      showToast(`Gold saved — pass-1 was correct, master dataset updated with gold evidence`);
+    } else {
+      showToast(`Gold saved — no source row to update in master dataset`);
+    }
+
     await loadAdminDashboard();
   } catch(e){
     showToast('Save failed: '+e.message,'error');
+    console.error(e);
   }
+  setLoading(false);
+}
+
+// ── Filter disagreements by stratum and gold status ──
+let _allDisPairs = [];
+
+function filterDisagreements(){
+  const strFilter  = document.getElementById('dis-filter').value;
+  const goldFilter = document.getElementById('dis-filter-gold').value;
+  const filtered = _allDisPairs.filter(({p1, p2, stratum, gold}) => {
+    if(strFilter && stratum !== strFilter) return false;
+    if(goldFilter==='pending' && gold) return false;
+    if(goldFilter==='done' && !gold) return false;
+    return true;
+  });
+  renderDisagreementCards(filtered);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1118,7 +1249,7 @@ async function exportResults(){
     const [cData,aData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:W`),
       sheetsGet(`${SHEETS.ANN}!A:J`)
-    ]);
+    ]); // export doesn't need tasks evidence
     const cRows=(cData.values||[]).slice(1).filter(r=>r[0]&&r[8]==='complete');
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
 
