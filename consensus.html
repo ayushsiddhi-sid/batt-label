@@ -1023,7 +1023,7 @@ function renderDisagreements(rows, p1EvidenceMap={}){
 
   // Store globally for filtering and post-render evidence population
   _p1EvidenceMap = p1EvidenceMap;
-  _allDisPairs=dis.map(r=>({r, gold:r[19]||'', stratum:r[5]||'', batteryId:r[0]}));
+  _allDisPairs=dis.map((r,i)=>({r, gold:r[19]||'', stratum:r[5]||'', batteryId:r[0], rowNum:rows.indexOf(r)+2}));
 
   // Populate stratum filter
   const sel=document.getElementById('dis-filter');
@@ -1053,8 +1053,7 @@ function renderDisagreementCards(pairs){
     container.innerHTML=`<div style="padding:48px;text-align:center;color:var(--text-dim);font-family:var(--mono);font-size:13px">No disagreements yet</div>`;
     return;
   }
-  container.innerHTML=dis.map((r,i)=>{
-    const rowNum=rows.indexOf(r)+2;
+  container.innerHTML=pairs.map(({r, rowNum},i)=>{
     const batteryId=r[0];
     const origAnnot=(r[4]||'—').split('@')[0];
     const p1Label=r[1]||'—', p1Sub=r[2]||'', p1Lfp=r[3]||'';
