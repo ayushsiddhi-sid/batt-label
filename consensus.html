@@ -1444,6 +1444,10 @@ async function saveAllGoldLabels(){
 
 This will update consensus_tasks and correct the tasks tab where pass-1 was wrong.`)) return;
 
+  // Refresh token before long batch save to prevent 401 mid-way
+  setLoading(true, 'Refreshing session before save…');
+  try { await refreshToken(); } catch(e) { console.warn('Token refresh:', e.message); }
+
   setLoading(true, `Saving ${pending.length} gold labels…`);
   try {
     // Read all consensus rows we need in one call to get pass1_row + annotator answers
