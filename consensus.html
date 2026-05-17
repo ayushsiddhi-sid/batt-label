@@ -494,6 +494,7 @@ let APP_CONFIG  = null;
 const CONFIG = {
   CLIENT_ID,
   get SHEET_ID()              { return APP_CONFIG ? APP_CONFIG.consensusSheetId : '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U'; },
+  get LABELING_SHEET_ID()     { return APP_CONFIG ? APP_CONFIG.labelingSheetId   : '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U'; },
   get ADMIN_EMAILS()          { return APP_CONFIG ? APP_CONFIG.adminEmails : ['ayush.siddhi@cloudfactory.com']; },
   set ADMIN_EMAILS(v)         { if (APP_CONFIG) APP_CONFIG.adminEmails = v; },
   get REVIEWER_EMAILS()       { return APP_CONFIG ? APP_CONFIG.reviewerEmails : REVIEWER_EMAILS_FALLBACK; },
@@ -507,6 +508,25 @@ const CONFIG = {
 };
 
 const SHEETS = { TASKS:'tasks', CONSENSUS:'consensus_tasks', ANN:'consensus_annotators' };
+// Tasks tab lives in the labeling sheet, not the consensus sheet
+async function labelingGet(range){
+  return sheetsRequest(async()=>{
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.LABELING_SHEET_ID}/values/${encodeURIComponent(range)}`;
+    const res = await fetch(url, {headers:{Authorization:'Bearer '+state.accessToken}});
+    const data = await res.json();
+    if(!res.ok && res.status!==401) throw new Error('Labeling GET failed: '+res.status);
+    return data;
+  });
+}
+async function labelingUpdate(range, values){
+  return sheetsRequest(async()=>{
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.LABELING_SHEET_ID}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+    const res = await fetch(url, {method:'PUT', headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json'}, body:JSON.stringify({values})});
+    const data = await res.json();
+    if(!res.ok && res.status!==401) throw new Error('Labeling UPDATE failed: '+res.status);
+    return data;
+  });
+}
 
 // Column indices for consensus_tasks (0-based)
 // battery_id(0) orig_label(1) orig_sub(2) orig_lfp(3) orig_annotator(4) stratum(5)
@@ -727,7 +747,7 @@ async function seedConsensusQueue(){
   setLoading(true,'Computing sample plan…');
   let _planPreview;
   try {
-    const _tPrev=await sheetsGet(`${SHEETS.TASKS}!A:D`);
+    const _tPrev=await labelingGet(`${SHEETS.TASKS}!A:D`);
     const _tRowsPrev=(_tPrev.values||[]).slice(1).filter(r=>r[0]&&r[9]==='complete'||true);
     // Quick stratum count for preview
     const _prevCounts={};
@@ -776,7 +796,7 @@ async function seedConsensusQueue(){
     // Read tasks sheet
     setLoading(true,'Reading completed tasks…');
     // Read tasks tab — need col I (assigned_to=r[8]) and col J (status=r[9])
-    const tData=await sheetsGet(`${SHEETS.TASKS}!A:N`);
+    const tData=await labelingGet(`${SHEETS.TASKS}!A:N`);
     const tRows=(tData.values||[]).slice(1)
       .map(r=>{ while(r.length<14) r.push(''); return r; })
       .filter(r=>r[0]&&r[9]==='complete');
@@ -1018,7 +1038,7 @@ async function loadAdminDashboard(){
     const [cData,aData,tData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:AA`),
       sheetsGet(`${SHEETS.ANN}!A:J`),
-      sheetsGet(`${SHEETS.TASKS}!A:F`)
+      labelingGet(`${SHEETS.TASKS}!A:F`)
     ]);
     const cRows=(cData.values||[]).slice(1)
       .filter(r=>r[0])
@@ -1247,7 +1267,7 @@ async function addSpecificTasks(){
   setLoading(true, 'Reading tasks tab…');
   try {
     // Read tasks tab to find matching rows
-    const tData = await sheetsGet(`${SHEETS.TASKS}!A:N`);
+    const tData = await labelingGet(`${SHEETS.TASKS}!A:N`);
     const tRows = (tData.values||[]).slice(1).map((r,i)=>({r, sheetRow:i+2}));
 
     // Read existing consensus queue to check for already-queued IDs
@@ -1612,10 +1632,10 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       // Queue tasks tab write
       if(p1RowNum){
         if(pass1Correct==='No'){
-          taskWrites.push(()=>sheetsUpdate(`${SHEETS.TASKS}!B${p1RowNum}:F${p1RowNum}`,[[gold, goldSub, goldLfp, goldEv, goldEvUrl||'']]));
+          taskWrites.push(()=>labelingUpdate(`${SHEETS.TASKS}!B${p1RowNum}:F${p1RowNum}`,[[gold, goldSub, goldLfp, goldEv, goldEvUrl||'']]));
           corrected++;
         } else {
-          taskWrites.push(()=>sheetsUpdate(`${SHEETS.TASKS}!E${p1RowNum}:F${p1RowNum}`,[[goldEv, goldEvUrl||'']]));
+          taskWrites.push(()=>labelingUpdate(`${SHEETS.TASKS}!E${p1RowNum}:F${p1RowNum}`,[[goldEv, goldEvUrl||'']]));
           evidenceOnly++;
         }
       } else {
