@@ -477,6 +477,7 @@ async function loadNextTask() {
     const task = await getOrAssignTask(state.user.email);
     if (!task) { showScreen('done'); setLoading(false); return; }
     state.currentTask = task;
+    showScreen('annotate');
     resetForm();
     document.getElementById('display-battery-id').textContent = task.batteryId;
     // Update progress from data already returned — no extra API calls
