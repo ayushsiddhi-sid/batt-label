@@ -699,18 +699,38 @@ async function seedConsensusQueue(){
   btn.disabled=true; btn.textContent='Seeding…';
   setLoading(true,'Reading tasks sheet…');
   try {
-    // Ensure sheets exist
-    await ensureSheet(SHEETS.CONSENSUS,[
-      'battery_id','original_label','original_sublabel','original_lfp','original_annotator',
-      'stratum','pass1_row','assigned_to','status','assigned_at',
-      'label','sublabel','lfp','evidence','evidence_url','text_logo_visible',
-      'submitted_at','time_taken_seconds','consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by','gold_evidence','gold_evidence_url','pass1_correct','pass2_correct'
-    ]);
-    await ensureSheet(SHEETS.ANN,[
-      'email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss'
-    ]);
-    // Ensure header has all 10 columns (in case tab was created with old 8-col schema)
-    await sheetsUpdate(`${SHEETS.ANN}!A1:J1`,[['email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss']]);
+    // Ensure sheets exist — single metadata call, then create only if missing
+    const metaRes = await sheetsRequest(async()=>{
+      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}`,
+        {headers:{Authorization:'Bearer '+state.accessToken}});
+      return res.json();
+    });
+    const existingSheets = new Set((metaRes.sheets||[]).map(s=>s.properties.title));
+    const CONSENSUS_HEADERS = ['battery_id','original_label','original_sublabel','original_lfp','original_annotator',
+      'stratum','pass1_row','assigned_to','status','assigned_at','label','sublabel','lfp',
+      'evidence','evidence_url','text_logo_visible','submitted_at','time_taken_seconds',
+      'consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by',
+      'gold_evidence','gold_evidence_url','pass1_correct','pass2_correct'];
+    const ANN_HEADERS = ['email','completed','agreements','disagreements','error_rate',
+      'total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss'];
+    if(!existingSheets.has(SHEETS.CONSENSUS)){
+      await sheetsRequest(async()=>{
+        const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}:batchUpdate`,
+          {method:'POST',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json'},
+           body:JSON.stringify({requests:[{addSheet:{properties:{title:SHEETS.CONSENSUS}}}]})});
+        return res.json();
+      });
+      await sheetsUpdate(`${SHEETS.CONSENSUS}!A1`,[CONSENSUS_HEADERS]);
+    }
+    if(!existingSheets.has(SHEETS.ANN)){
+      await sheetsRequest(async()=>{
+        const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${CONFIG.SHEET_ID}:batchUpdate`,
+          {method:'POST',headers:{Authorization:'Bearer '+state.accessToken,'Content-Type':'application/json'},
+           body:JSON.stringify({requests:[{addSheet:{properties:{title:SHEETS.ANN}}}]})});
+        return res.json();
+      });
+      await sheetsUpdate(`${SHEETS.ANN}!A1`,[ANN_HEADERS]);
+    }
 
     // Read tasks sheet
     setLoading(true,'Reading completed tasks…');
@@ -940,7 +960,7 @@ async function loadAdminDashboard(){
       switchTab('disagree');
     }
     const [cData,aData,tData]=await Promise.all([
-      sheetsGet(`${SHEETS.CONSENSUS}!A:W`),
+      sheetsGet(`${SHEETS.CONSENSUS}!A:AA`),
       sheetsGet(`${SHEETS.ANN}!A:J`),
       sheetsGet(`${SHEETS.TASKS}!A:F`)
     ]);
@@ -1142,11 +1162,13 @@ let _p1EvidenceMap={};
 let _pendingGold={};  // rowNum → {gold, goldSub, goldLfp, goldEv, batteryId}
 
 function renderDisagreements(rows, p1EvidenceMap={}){
-  const dis=rows.filter(r=>r[18]==='disagree');
-
   // Store globally for filtering and post-render evidence population
   _p1EvidenceMap = p1EvidenceMap;
-  _allDisPairs=dis.map((r,i)=>({r, gold:r[19]||'', stratum:r[5]||'', batteryId:r[0], rowNum:rows.indexOf(r)+2}));
+  // Build pairs with rowNum directly — avoids O(n²) indexOf scan
+  _allDisPairs=[];
+  rows.forEach((r,i)=>{
+    if(r[18]==='disagree') _allDisPairs.push({r, gold:r[19]||'', stratum:r[5]||'', batteryId:r[0], rowNum:i+2});
+  });
 
   // Populate stratum filter
   const sel=document.getElementById('dis-filter');
@@ -1505,7 +1527,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     let taskWrites = [];
     let corrected = 0, evidenceOnly = 0, skipped = 0;
 
-    for(const [rowNum, {gold, goldSub, goldLfp, goldEv, batteryId}] of pending){
+    for(const [rowNum, {gold, goldSub, goldLfp, goldEv, goldEvUrl='', batteryId}] of pending){
       const rn = parseInt(rowNum);
       const r = (rangeRows[rn - minRow] || []);
       while(r.length<19) r.push('');
@@ -1526,7 +1548,6 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       const pass2Correct = p2Label===gL && p2Sub===gS && p2Lfp===gF ? 'Yes' : 'No';
 
       // Queue consensus_tasks write
-      const {goldEvUrl=''} = pending.find(([r])=>parseInt(r)===rn)?.[1]||{};
       consensusWrites.push(()=>sheetsUpdate(
         `${SHEETS.CONSENSUS}!T${rn}:AA${rn}`,
         [[gold, goldSub, goldLfp, state.user.email, goldEv, goldEvUrl, pass1Correct, pass2Correct]]
