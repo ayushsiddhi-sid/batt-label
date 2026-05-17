@@ -422,26 +422,21 @@ async function submitTask(rowIndex, fields, timeTaken) {
 }
 
 async function updateAnnotatorRecord(email, timeTaken) {
-  // Recount from tasks sheet — prevents double-count from any retry
-  const [annData, taskData] = await Promise.all([
-    sheetsGet(`${SHEETS.ANNOTATORS}!A:D`),
-    sheetsGet(`${SHEETS.TASKS}!A:N`)
-  ]);
-  const annRows  = annData.values  || [];
-  const taskRows = taskData.values || [];
-  const myTasks  = taskRows.slice(1).filter(r => r[8] === email && r[9] === 'complete');
-  const total    = myTasks.length;
-  const totalSec = myTasks.reduce((s, r) => s + (parseInt(r[12]) || 0), 0);
-  const now      = new Date().toISOString();
-
+  // Simple increment — double-fire prevented by _submitting guard in handleSubmit
+  const data = await sheetsGet(`${SHEETS.ANNOTATORS}!A:D`);
+  const rows = data.values || [];
+  const now  = new Date().toISOString();
   let rowIdx = -1;
-  for (let i = 1; i < annRows.length; i++) {
-    if (annRows[i][0] === email) { rowIdx = i + 1; break; }
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === email) { rowIdx = i + 1; break; }
   }
   if (rowIdx === -1) {
-    await sheetsAppend(`${SHEETS.ANNOTATORS}!A:D`, [[email, total, totalSec, now]]);
+    await sheetsAppend(`${SHEETS.ANNOTATORS}!A:D`, [[email, 1, timeTaken, now]]);
   } else {
-    await sheetsUpdate(`${SHEETS.ANNOTATORS}!A${rowIdx}:D${rowIdx}`, [[email, total, totalSec, now]]);
+    const prev = rows[rowIdx - 1];
+    const completed = (parseInt(prev[1]) || 0) + 1;
+    const totalSec  = (parseInt(prev[2]) || 0) + timeTaken;
+    await sheetsUpdate(`${SHEETS.ANNOTATORS}!A${rowIdx}:D${rowIdx}`, [[email, completed, totalSec, now]]);
   }
 }
 
