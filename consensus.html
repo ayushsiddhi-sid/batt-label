@@ -250,19 +250,6 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
   </div>
 </div>
 
-<!-- DIAGNOSTIC -->
-<div class="screen" id="screen-diagnostic">
-  <div style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 56px)">
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:32px;width:560px">
-      <div style="font-family:var(--mono);font-size:14px;font-weight:600;color:var(--accent);margin-bottom:16px">Connection Diagnostic</div>
-      <div id="diag-output" style="font-family:var(--mono);font-size:12px;color:var(--text-muted);line-height:2"></div>
-      <div style="margin-top:20px;display:flex;gap:10px">
-        <button class="btn-primary" onclick="runDiagnostic()" style="font-size:11px">↻ Run again</button>
-        <button class="btn-secondary" onclick="showScreen('login');signOut()" style="font-size:11px">Sign out</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- ADMIN -->
 <div class="screen" id="screen-admin">
@@ -469,8 +456,10 @@ function parseConfig(raw) {
 }
 
 const CLIENT_ID = '92798755923-ah1qkitovkkq4qcs53rv6srpu86106lk.apps.googleusercontent.com';
-// Fallback reviewer list — used if config sheet is unreachable
-// Update this AND the config sheet when adding/removing reviewers
+// Reviewer fallback — only used if config sheet is unreachable.
+// Primary source is reviewer_emails in the config sheet.
+// Add emails here only as a last resort for @es.cloudfactory.com accounts
+// that cannot access the config sheet.
 const REVIEWER_EMAILS_FALLBACK = [];
 const SCOPES    = 'openid email profile https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.readonly';
 let APP_CONFIG  = null;
@@ -668,6 +657,36 @@ function computeSamplePlan(stratumCounts) {
   return { plan, total, z, p, e };
 }
 
+
+// ── Stratum classification (shared by seed and addSpecificTasks) ──
+function getStratum(r){
+  const label=r[1]||'', sub=r[2]||'', lfp=r[3]||'';
+  if(label==='Data Error')   return 'Data Error';
+  if(label==='NiCd')         return 'NiCd';
+  if(label==='NiMH')         return 'NiMH';
+  if(label==='Lead')         return 'Lead';
+  if(label==='Alkaline')     return 'Alkaline';
+  if(label==='Zinc-Carbon')  return 'Zinc-Carbon';
+  if(label==='Mercury')      return 'Mercury';
+  if(label==='Unknown')      return 'Unknown';
+  if(label==='Lithium'){
+    if(sub==='Li-ion'&&lfp==='Yes') return 'Lithium — Li-ion LFP';
+    if(sub==='Li-ion'&&lfp==='No')  return 'Lithium — Li-ion non-LFP';
+    if(sub==='Li-ion')              return 'Lithium — Li-ion LFP unknown';
+    if(sub==='Li Primary')          return 'Lithium — Li Primary';
+    return 'Lithium — sublabel unknown';
+  }
+  return label||'Unknown';
+}
+
+function shuffle(arr){
+  for(let i=arr.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [arr[i],arr[j]]=[arr[j],arr[i]];
+  }
+  return arr;
+}
+
 async function seedConsensusQueue(){
   const btn=document.getElementById('btn-seed');
   if(!confirm('This will read the tasks tab, draw a stratified sample of 774 tasks, and write them to consensus_tasks.\n\nAlready-seeded battery IDs are skipped — safe to re-run. Continue?')) return;
@@ -700,25 +719,7 @@ async function seedConsensusQueue(){
     const seeded=new Set((cData.values||[]).slice(1).map(r=>r[0]).filter(Boolean));
 
     // Assign strata to tasks
-    function getStratum(r){
-      const label=r[1], sub=r[2]||'', lfp=r[3]||'';
-      if(label==='Data Error') return 'Data Error';
-      if(label==='NiCd') return 'NiCd';
-      if(label==='NiMH') return 'NiMH';
-      if(label==='Lead') return 'Lead';
-      if(label==='Alkaline') return 'Alkaline';
-      if(label==='Zinc-Carbon') return 'Zinc-Carbon';
-      if(label==='Mercury') return 'Mercury';
-      if(label==='Unknown') return null; // not in consensus
-      if(label==='Lithium'){
-        if(sub==='Li-ion'&&lfp==='Yes') return 'Lithium — Li-ion LFP';
-        if(sub==='Li-ion'&&lfp==='No')  return 'Lithium — Li-ion non-LFP';
-        if(sub==='Li-ion')              return 'Lithium — Li-ion LFP unknown';
-        if(sub==='Li Primary')          return 'Lithium — Li Primary';
-        return 'Lithium — sublabel unknown';
-      }
-      return null;
-    }
+    // getStratum defined at top level
 
     // Group eligible rows by stratum, excluding already-seeded
     const byStratum={};
@@ -738,7 +739,7 @@ async function seedConsensusQueue(){
     setLoading(true, `Seeding ${planTotal} tasks (±${moeOverall}% margin, ${Math.round(CONFIG.CONFIDENCE*100)}% CI)…`);
 
     // Draw sample (shuffle then take N)
-    function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
+    // shuffle defined at top level
 
     const toWrite=[];
     let totalNew=0;
@@ -841,13 +842,9 @@ async function submitTask(rowIndex,fields,timeTaken){
 }
 
 async function updateAnnotatorRecord(email,consensus,timeTaken){
-  // Ensure header row exists with correct columns
+  // Header managed by ensureSheet during seed — no check needed here
   const data=await sheetsGet(`${SHEETS.ANN}!A:J`);
   const rows=data.values||[];
-  // If sheet is empty or has wrong header, write it
-  if(!rows.length || rows[0][0]!=='email'){
-    await sheetsUpdate(`${SHEETS.ANN}!A1:J1`,[['email','completed','agreements','disagreements','error_rate','total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss']]);
-  }
   let rowIdx=-1;
   for(let i=1;i<rows.length;i++){
     if(rows[i][0]===email){ rowIdx=i+1; break; }
@@ -1136,25 +1133,7 @@ async function addSpecificTasks(){
       const {r, sheetRow} = best;
 
       // Determine stratum
-      function getStratum(r){
-        const label=r[1], sub=r[2]||'', lfp=r[3]||'';
-        if(label==='Data Error') return 'Data Error';
-        if(label==='NiCd') return 'NiCd';
-        if(label==='NiMH') return 'NiMH';
-        if(label==='Lead') return 'Lead';
-        if(label==='Alkaline') return 'Alkaline';
-        if(label==='Zinc-Carbon') return 'Zinc-Carbon';
-        if(label==='Mercury') return 'Mercury';
-        if(label==='Unknown') return 'Unknown';
-        if(label==='Lithium'){
-          if(sub==='Li-ion'&&lfp==='Yes') return 'Lithium — Li-ion LFP';
-          if(sub==='Li-ion'&&lfp==='No')  return 'Lithium — Li-ion non-LFP';
-          if(sub==='Li-ion')              return 'Lithium — Li-ion LFP unknown';
-          if(sub==='Li Primary')          return 'Lithium — Li Primary';
-          return 'Lithium — sublabel unknown';
-        }
-        return label||'Unknown';
-      }
+      // getStratum defined at top level
 
       toAdd.push([
         r[0],           // battery_id
@@ -1676,53 +1655,6 @@ async function signInUser(email){
   }
 }
 
-async function runDiagnostic(){
-  const out = document.getElementById('diag-output');
-  const log = (msg, ok=null) => {
-    const color = ok===true?'var(--green)':ok===false?'var(--red)':'var(--text-muted)';
-    out.innerHTML += `<div style="color:${color}">${msg}</div>`;
-  };
-  out.innerHTML = '';
-  log('Starting diagnostic…');
-
-  // 1. Token
-  log(state.accessToken ? '✓ Token present' : '✗ No token — please sign in again', !!state.accessToken);
-
-  // 2. Read consensus_tasks
-  try {
-    const d = await sheetsGet(`${SHEETS.CONSENSUS}!A1:A2`);
-    log('✓ Can read consensus_tasks tab', true);
-  } catch(e) { log('✗ Cannot read consensus_tasks: ' + e.message, false); }
-
-  // 3. Write test — write to a temp cell and read it back
-  try {
-    const testVal = 'diag_' + Date.now();
-    await sheetsUpdate(`${SHEETS.CONSENSUS}!V1`, [[testVal]]);
-    const verify = await sheetsGet(`${SHEETS.CONSENSUS}!V1`);
-    const got = ((verify.values||[[]])[0]||[])[0]||'';
-    if(got === testVal) {
-      log('✓ Can write to consensus_tasks tab', true);
-      // Clean up
-      await sheetsUpdate(`${SHEETS.CONSENSUS}!V1`, [['']]); 
-    } else {
-      log('✗ Write succeeded but value mismatch — possible caching issue', false);
-    }
-  } catch(e) { log('✗ Cannot write to consensus_tasks: ' + e.message, false); }
-
-  // 4. Read tasks tab (for blind assignment)
-  try {
-    const d = await sheetsGet(`${SHEETS.TASKS}!A1:A2`);
-    log('✓ Can read tasks tab', true);
-  } catch(e) { log('✗ Cannot read tasks tab: ' + e.message, false); }
-
-  // 5. Annotator record write
-  try {
-    const d = await sheetsGet(`${SHEETS.ANN}!A1:A2`);
-    log('✓ Can read consensus_annotators tab', true);
-  } catch(e) { log('✗ Cannot read consensus_annotators: ' + e.message, false); }
-
-  log('Diagnostic complete.');
-}
 
 function signOut(){
   state.user=null; state.accessToken=null; state.currentTask=null;
@@ -1736,27 +1668,26 @@ function signOut(){
 // ═══════════════════════════════════════════════════════════════
 // FORM LOGIC
 // ═══════════════════════════════════════════════════════════════
-function attachTemplateDropdown(){
-  const sel = document.getElementById('template-select');
-  const box = document.getElementById('field-evidence');
-  const hint = document.getElementById('template-hint');
-  sel.innerHTML = buildTemplateHTML();
-  sel.addEventListener('change', () => {
-    if (!sel.value) return;
-    box.value = sel.value;
-    box.focus();
-    // Show hint if template has [brackets] to fill in
-    hint.style.display = sel.value.includes('[') ? '' : 'none';
-    sel.value = '';
-  });
-}
+// Template dropdown wired in DOMContentLoaded
 
 // ═══════════════════════════════════════════════════════════════
 // INIT
 // ═══════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded',()=>{
   initTokenClient();
-  attachTemplateDropdown();
+  // Template dropdown
+  (()=>{
+    const sel=document.getElementById('template-select');
+    const box=document.getElementById('field-evidence');
+    const hint=document.getElementById('template-hint');
+    sel.innerHTML=buildTemplateHTML();
+    sel.addEventListener('change',()=>{
+      if(!sel.value) return;
+      box.value=sel.value; box.focus();
+      hint.style.display=sel.value.includes('[')?'':'none';
+      sel.value='';
+    });
+  })();
   showScreen('login');
 
   document.getElementById('btn-signin').addEventListener('click',()=>window._tc.requestAccessToken({prompt:'select_account'}));
