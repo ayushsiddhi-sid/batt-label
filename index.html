@@ -231,6 +231,7 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <button class="btn-secondary" id="btn-config">⚙ Config sheet</button>
       <button class="btn-secondary" id="btn-data-sheet">⬡ Data sheet</button>
       <button class="btn-secondary" id="btn-init-sheet">⊕ Initialize sheet</button>
+      <button class="btn-primary" id="btn-start-labeling">→ Start labeling</button>
     </div>
   </div>
 
@@ -779,6 +780,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else { loadAdminDashboard(); showScreen('admin'); }
   });
   document.getElementById('btn-refresh').addEventListener('click', loadAdminDashboard);
+  document.getElementById('btn-start-labeling').addEventListener('click', () => loadNextTask());
   document.getElementById('btn-config').addEventListener('click', () =>
     window.open(`https://docs.google.com/spreadsheets/d/${CONFIG_SHEET_ID}/edit`, '_blank'));
   document.getElementById('btn-data-sheet').addEventListener('click', () =>
