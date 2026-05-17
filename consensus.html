@@ -539,6 +539,7 @@ let state = {
   user: null, accessToken: null, isAdmin: false, isReviewer: false,
   currentTask: null, timerStart: null, timerInterval: null,
   sessionCompleted: 0, sessionAgreed: 0, sessionDisagreed: 0,
+  tokenIssuedAt: null,
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -1434,6 +1435,13 @@ function stageGoldLabel(rowNum, batteryId, idx){
   if(saveBar){ saveBar.style.display='flex'; }
   if(saveBtn) saveBtn.textContent = `↑ Save ${count} to master dataset`;
   showToast(`Staged — ${count} total pending`);
+
+  // Remind to save every 25 staged labels
+  if(count > 0 && count % 25 === 0){
+    if(confirm(`You have ${count} labels staged.\n\nRecommended: save now to avoid losing work if your session expires.\n\nSave now?`)){
+      saveAllGoldLabels();
+    }
+  }
 }
 
 // ── Batch save all staged gold labels ──
@@ -1444,9 +1452,7 @@ async function saveAllGoldLabels(){
 
 This will update consensus_tasks and correct the tasks tab where pass-1 was wrong.`)) return;
 
-  // Refresh token before long batch save to prevent 401 mid-way
-  setLoading(true, 'Refreshing session before save…');
-  try { await refreshToken(); } catch(e) { console.warn('Token refresh:', e.message); }
+
 
   setLoading(true, `Saving ${pending.length} gold labels…`);
   try {
@@ -1621,6 +1627,7 @@ function initTokenClient(){
     callback:async(resp)=>{
       if(resp.error){ showToast('Sign-in error: '+resp.error,'error'); return; }
       state.accessToken=resp.access_token;
+      state.tokenIssuedAt=Date.now();
       clearInterval(window._refreshInt);
       window._refreshInt=setInterval(async()=>{ try{ await refreshToken(); }catch(e){} },45*60*1000);
       if(state.user) return;
