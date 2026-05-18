@@ -513,6 +513,15 @@ async function labelingUpdate(range, values){
 // text_logo_visible(15) submitted_at(16) time_taken_seconds(17)
 // consensus_status(18) gold_label(19) gold_sublabel(20) gold_lfp(21) gold_set_by(22) gold_evidence(23) gold_evidence_url(24) pass1_correct(25) pass2_correct(26)
 
+// Pool sizes per stratum — used in Accuracy by Stratum table to show total available
+// Update these when batch data changes significantly
+const STRATA_POOLS = {
+  'Lithium — Li-ion LFP unknown':3365,'Lithium — Li-ion non-LFP':2945,
+  'NiCd':1240,'Data Error':623,'Lithium — Li-ion LFP':132,
+  'NiMH':97,'Lithium — sublabel unknown':42,'Lithium — Li Primary':10,
+  'Lead':6,'Alkaline':1,'Zinc-Carbon':1,'Mercury':1
+};
+
 const EVIDENCE_TEMPLATES = [
   { group: 'Direct evidence', label: 'Text visible',                    text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
   { group: 'Direct evidence', label: 'Logo visible',                    text: 'The presence of visible [chemistry] recycling logo in [cam].jpg provides sufficient evidence.' },
