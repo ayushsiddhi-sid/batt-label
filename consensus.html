@@ -803,9 +803,6 @@ async function seedConsensusQueue(){
     console.log('Seed debug — total rows:', (tData.values||[]).length-1,
       '| completed:', tRows.length,
       '| sample statuses:', (tData.values||[]).slice(1,4).map(r=>r[9]));
-    console.log('Seed debug — seeded set size:', seeded.size, '| seeded IDs:', [...seeded].slice(0,5));
-    console.log('Seed debug — byStratum:', JSON.stringify(Object.keys(byStratum).map(k=>({stratum:k,count:byStratum[k].length}))));
-    console.log('Seed debug — plan:', JSON.stringify(Object.entries(plan||{}).map(([k,v])=>({stratum:k,N:v.N,n:v.n}))));
 
     // Read existing consensus to find already-seeded battery IDs
     const cData=await sheetsGet(`${SHEETS.CONSENSUS}!A:A`);
@@ -827,6 +824,8 @@ async function seedConsensusQueue(){
     const stratumCounts={};
     for(const [s,pool] of Object.entries(byStratum)) stratumCounts[s]=pool.length;
     const {plan, total:planTotal, z, p, e} = computeSamplePlan(stratumCounts);
+    console.log('Seed debug — seeded:', seeded.size, '| byStratum:', JSON.stringify(Object.keys(byStratum).map(k=>({s:k,n:byStratum[k].length}))));
+    console.log('Seed debug — plan:', JSON.stringify(Object.entries(plan).map(([k,v])=>({s:k,N:v.N,n:v.n}))), '| total:', planTotal);
 
     const moeOverall=(z*Math.sqrt(p*(1-p)/planTotal)*100).toFixed(1);
     setLoading(true, `Seeding ${planTotal} tasks (±${moeOverall}% margin, ${Math.round(CONFIG.CONFIDENCE*100)}% CI)…`);
