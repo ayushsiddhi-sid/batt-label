@@ -414,6 +414,7 @@ const CONFIG_SHEET_ID = '1axlYSB3d5H0tDO4M_UA73QmKUY60xkzTrUi2Wfz1cls';
 const CONFIG_DEFAULTS = {
   admin_emails:                  'ayush.siddhi@cloudfactory.com, robina@cloudfactory.com',
   reviewer_emails:               '',
+  reviewer_emails:               '',
   labeling_sheet_id:             '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
   assessment_sheet_id:           '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE',
   consensus_sheet_id:            '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
@@ -476,7 +477,10 @@ function parseConfig(raw) {
 
     // Consensus
     // sample size is computed dynamically by computeSamplePlan — not configured
-    consensusFlagThreshold:     parseInt(raw.consensus_flag_threshold) || 2,
+    consensusConfidence:        parseFloat(raw.consensus_confidence)      || 0.95,
+    consensusMarginError:       parseFloat(raw.consensus_margin_error)     || 0.035,
+    consensusAccuracyTarget:    parseFloat(raw.consensus_accuracy_target)  || 0.95,
+    consensusFlagThreshold:     parseInt(raw.consensus_flag_threshold)     || 2,
     consensusDeepDiveThreshold: parseInt(raw.consensus_deepdive_threshold) || 3,
     consensusDeepDiveErrorRate: parseFloat(raw.consensus_deepdive_error_rate) || 0.25,
   };
