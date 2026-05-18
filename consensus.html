@@ -174,32 +174,6 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     </div>
   </div>
 
-  <!-- Pass-1 context — shown so pass-2 annotator knows what they're checking against -->
-  <div id="pass1-context" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:12px 16px;margin-bottom:12px;display:none">
-    <div style="font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px">Pass 1 — original annotation</div>
-    <div style="display:flex;gap:24px;flex-wrap:wrap">
-      <div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:3px">Annotator</div>
-        <div style="font-family:var(--mono);font-size:12px;color:var(--text-muted)" id="p1-annotator">—</div>
-      </div>
-      <div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:3px">Label</div>
-        <div style="font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text)" id="p1-label">—</div>
-      </div>
-      <div id="p1-sub-wrap" style="display:none">
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:3px">Sub-label</div>
-        <div style="font-family:var(--mono);font-size:13px;color:var(--text)" id="p1-sublabel">—</div>
-      </div>
-      <div id="p1-lfp-wrap" style="display:none">
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:3px">LFP</div>
-        <div style="font-family:var(--mono);font-size:13px;color:var(--text)" id="p1-lfp">—</div>
-      </div>
-      <div>
-        <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-bottom:3px">Stratum</div>
-        <div style="font-family:var(--mono);font-size:11px;color:var(--text-muted)" id="p1-stratum">—</div>
-      </div>
-    </div>
-  </div>
 
   <div class="form-card">
     <div class="field">
@@ -538,13 +512,6 @@ async function labelingUpdate(range, values){
 // label(10) sublabel(11) lfp(12) evidence(13) evidence_url(14)
 // text_logo_visible(15) submitted_at(16) time_taken_seconds(17)
 // consensus_status(18) gold_label(19) gold_sublabel(20) gold_lfp(21) gold_set_by(22) gold_evidence(23) gold_evidence_url(24) pass1_correct(25) pass2_correct(26)
-
-const STRATA_POOLS = {
-  'Lithium — Li-ion LFP unknown':3365,'Lithium — Li-ion non-LFP':2945,
-  'NiCd':1240,'Data Error':623,'Lithium — Li-ion LFP':132,
-  'NiMH':97,'Lithium — sublabel unknown':42,'Lithium — Li Primary':10,
-  'Lead':6,'Alkaline':1,'Zinc-Carbon':1,'Mercury':1
-};
 
 const EVIDENCE_TEMPLATES = [
   { group: 'Direct evidence', label: 'Text visible',                    text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
@@ -1004,20 +971,6 @@ async function loadNextTask(){
     document.getElementById('display-battery-id').textContent=task.batteryId;
     document.getElementById('progress-text').textContent=`${state.sessionCompleted} done this session`;
 
-    // Show pass-1 context panel
-    const ctx = document.getElementById('pass1-context');
-    if(task.origLabel){
-      document.getElementById('p1-annotator').textContent = (task.origAnnotator||'—').split('@')[0];
-      document.getElementById('p1-label').textContent     = task.origLabel||'—';
-      document.getElementById('p1-sublabel').textContent  = task.origSub||'—';
-      document.getElementById('p1-lfp').textContent       = task.origLfp||'—';
-      document.getElementById('p1-stratum').textContent   = task.stratum||'—';
-      document.getElementById('p1-sub-wrap').style.display = task.origSub ? '' : 'none';
-      document.getElementById('p1-lfp-wrap').style.display = task.origLfp ? '' : 'none';
-      ctx.style.display = '';
-    } else {
-      ctx.style.display = 'none';
-    }
 
     startTimer();
   } catch(e){
@@ -1149,9 +1102,13 @@ function renderCW(aRows, cRows){
   const annStats={};
 
   // Process pass-1 annotators (original_annotator = col E, index 4)
+  // Exclude same-annotator pairs from accuracy stats
   cRows.forEach(r=>{
     const p1ann = r[4];
+    const p2ann = r[7];
     if(!p1ann || r[8]!=='complete') return;
+    // Skip same-annotator — can't be used for accuracy
+    if(p1ann && p2ann && p1ann.toLowerCase()===p2ann.toLowerCase()) return;
     if(!annStats[p1ann]) annStats[p1ann]={sampled:0,completed:0,agreed:0,disagreed:0,p1Correct:0,p1Wrong:0,p1Pending:0};
     annStats[p1ann].sampled++;
     annStats[p1ann].completed++;
@@ -1169,9 +1126,12 @@ function renderCW(aRows, cRows){
   });
 
   // Process pass-2 annotators (assigned_to = col H, index 7)
+  // Exclude same-annotator pairs from accuracy stats
   cRows.forEach(r=>{
     const p2ann = r[7];
     if(!p2ann || r[8]!=='complete') return;
+    // Skip same-annotator
+    if(r[4] && p2ann && r[4].toLowerCase()===p2ann.toLowerCase()) return;
     if(!annStats[p2ann]) annStats[p2ann]={sampled:0,completed:0,agreed:0,disagreed:0,p2Correct:0,p2Wrong:0,p2Pending:0};
     // Don't double-count sampled/completed for pass-2
     if(r[18]==='agree'){
