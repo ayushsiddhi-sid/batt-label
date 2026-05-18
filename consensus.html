@@ -498,12 +498,12 @@ const CONFIG = {
   get ADMIN_EMAILS()          { return APP_CONFIG ? APP_CONFIG.adminEmails : ['ayush.siddhi@cloudfactory.com']; },
   set ADMIN_EMAILS(v)         { if (APP_CONFIG) APP_CONFIG.adminEmails = v; },
   get REVIEWER_EMAILS()       { return APP_CONFIG ? APP_CONFIG.reviewerEmails : REVIEWER_EMAILS_FALLBACK; },
-  get FLAG_THRESHOLD()        { return APP_CONFIG ? APP_CONFIG.consensusFlagThreshold : 2; },
-  get DEEPDIVE_THRESHOLD()    { return APP_CONFIG ? APP_CONFIG.consensusDeepDiveThreshold : 3; },
-  get DEEPDIVE_ERROR_RATE()   { return APP_CONFIG ? APP_CONFIG.consensusDeepDiveErrorRate : 0.25; },
-  get CONFIDENCE()            { return APP_CONFIG ? APP_CONFIG.consensusConfidence : 0.95; },
-  get MARGIN_ERROR()          { return APP_CONFIG ? APP_CONFIG.consensusMarginError : 0.035; },
-  get ACCURACY_TARGET()       { return APP_CONFIG ? APP_CONFIG.consensusAccuracyTarget : 0.95; },
+  get FLAG_THRESHOLD()        { return APP_CONFIG ? parseInt(APP_CONFIG.consensusFlagThreshold)    : 2; },
+  get DEEPDIVE_THRESHOLD()    { return APP_CONFIG ? parseInt(APP_CONFIG.consensusDeepDiveThreshold): 3; },
+  get DEEPDIVE_ERROR_RATE()   { return APP_CONFIG ? parseFloat(APP_CONFIG.consensusDeepDiveErrorRate): 0.25; },
+  get CONFIDENCE()            { return APP_CONFIG ? parseFloat(APP_CONFIG.consensusConfidence)     : 0.95; },
+  get MARGIN_ERROR()          { return APP_CONFIG ? parseFloat(APP_CONFIG.consensusMarginError)    : 0.035; },
+  get ACCURACY_TARGET()       { return APP_CONFIG ? parseFloat(APP_CONFIG.consensusAccuracyTarget) : 0.95; },
   SCOPES,
 };
 
@@ -800,9 +800,7 @@ async function seedConsensusQueue(){
     const tRows=(tData.values||[]).slice(1)
       .map(r=>{ while(r.length<14) r.push(''); return r; })
       .filter(r=>r[0]&&r[9]==='complete');
-    console.log('Seed debug — total rows:', (tData.values||[]).length-1,
-      '| completed:', tRows.length,
-      '| sample statuses:', (tData.values||[]).slice(1,4).map(r=>r[9]));
+
 
     // Read existing consensus to find already-seeded battery IDs
     const cData=await sheetsGet(`${SHEETS.CONSENSUS}!A:A`);
@@ -824,8 +822,7 @@ async function seedConsensusQueue(){
     const stratumCounts={};
     for(const [s,pool] of Object.entries(byStratum)) stratumCounts[s]=pool.length;
     const {plan, total:planTotal, z, p, e} = computeSamplePlan(stratumCounts);
-    console.log('Seed debug — seeded:', seeded.size, '| byStratum:', JSON.stringify(Object.keys(byStratum).map(k=>({s:k,n:byStratum[k].length}))));
-    console.log('Seed debug — plan:', JSON.stringify(Object.entries(plan).map(([k,v])=>({s:k,N:v.N,n:v.n}))), '| total:', planTotal);
+
 
     const moeOverall=(z*Math.sqrt(p*(1-p)/planTotal)*100).toFixed(1);
     setLoading(true, `Seeding ${planTotal} tasks (±${moeOverall}% margin, ${Math.round(CONFIG.CONFIDENCE*100)}% CI)…`);
