@@ -261,17 +261,6 @@
           <label>Label *</label>
           <select id="field-label">
             <option value="">— Select label —</option>
-            <option>Lithium</option>
-            <option>NiMH</option>
-            <option>NiCd</option>
-            <option>Lead</option>
-            <option>Alkaline</option>
-            <option>Zinc-Carbon</option>
-            <option>Silver</option>
-            <option>Mercury</option>
-            <option>Arsenic</option>
-            <option>Unknown</option>
-            <option>Data Error</option>
           </select>
         </div>
 
@@ -459,6 +448,7 @@ const CONFIG_SHEET_ID = '1axlYSB3d5H0tDO4M_UA73QmKUY60xkzTrUi2Wfz1cls';
 const CONFIG_DEFAULTS = {
   admin_emails:                  'ayush.siddhi@cloudfactory.com, robina@cloudfactory.com',
   reviewer_emails:               '',
+  labels:                        'Lithium,NiMH,NiCd,Lead,Alkaline,Zinc-Carbon,Zinc-Air,Silver,Mercury,Arsenic,Unknown,Data Error',
   labeling_sheet_id:             '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
   assessment_sheet_id:           '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE',
   consensus_sheet_id:            '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
@@ -507,6 +497,7 @@ function parseConfig(raw) {
   return {
     // Auth
     adminEmails:    raw.admin_emails.split(',').map(e => e.trim()).filter(Boolean),
+    labels:         (raw.labels||'').split(',').map(e=>e.trim()).filter(Boolean),
   reviewerEmails: (raw.reviewer_emails||'').split(',').map(e => e.trim()).filter(Boolean),
 
     // Sheet IDs per app
@@ -536,6 +527,7 @@ const CONFIG = {
   CLIENT_ID,
   get SHEET_ID()      { return APP_CONFIG ? APP_CONFIG.assessmentSheetId : '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE'; },
   get ADMIN_EMAILS()  { return APP_CONFIG ? APP_CONFIG.adminEmails : ['ayush.siddhi@cloudfactory.com']; },
+  get LABELS()        { return APP_CONFIG && APP_CONFIG.labels && APP_CONFIG.labels.length ? APP_CONFIG.labels : 'Lithium,NiMH,NiCd,Lead,Alkaline,Zinc-Carbon,Zinc-Air,Silver,Mercury,Arsenic,Unknown,Data Error'.split(','); },
   set ADMIN_EMAILS(v) { if (APP_CONFIG) APP_CONFIG.adminEmails = v; },
   get PASSING_SCORE() { return APP_CONFIG ? APP_CONFIG.assessmentPassingScore : 70; },
   SCOPES,
@@ -1177,6 +1169,9 @@ async function signInUser(email, name) {
       return;
     }
 
+    // Build label dropdown now that config is loaded
+    if(window.buildLabelDropdown) window.buildLabelDropdown();
+
     // Start assessment
     state.currentTaskIndex = 0;
     state.answers = [];
@@ -1292,6 +1287,18 @@ function attachTemplateDropdown(selectId, textareaId) {
 document.addEventListener('DOMContentLoaded', () => {
   initTokenClient();
   showScreen('login');
+
+  // Build label dropdown from config (populated after sign-in via CONFIG.LABELS)
+  // Dropdown starts empty and is filled once config is loaded
+  window.buildLabelDropdown = function(){
+    const sel = document.getElementById('field-label');
+    if(!sel || sel.options.length > 1) return;
+    CONFIG.LABELS.forEach(l => {
+      const o = document.createElement('option');
+      o.value = o.textContent = l;
+      sel.appendChild(o);
+    });
+  };
 
   document.getElementById('btn-google-signin').addEventListener('click', () => {
     window._tokenClient.requestAccessToken({ prompt: 'select_account' });
