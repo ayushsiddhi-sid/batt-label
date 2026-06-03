@@ -142,10 +142,6 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <label>Label *</label>
       <select id="field-label">
         <option value="">— Select label —</option>
-        <option>Lithium</option><option>NiMH</option><option>NiCd</option>
-        <option>Lead</option><option>Alkaline</option><option>Zinc-Carbon</option>
-        <option>Silver</option><option>Mercury</option><option>Arsenic</option>
-        <option>Unknown</option><option>Data Error</option>
       </select>
     </div>
     <div class="conditional-fields" id="lithium-fields">
@@ -298,6 +294,7 @@ let APP_CONFIG = null;
 const CONFIG = {
   get SHEET_ID()     { return APP_CONFIG ? APP_CONFIG.labelingSheetId    : CONFIG_DEFAULTS.labeling_sheet_id; },
   get ADMIN_EMAILS() { return APP_CONFIG ? APP_CONFIG.adminEmails         : CONFIG_DEFAULTS.admin_emails.split(',').map(e=>e.trim()); },
+  get LABELS()        { return APP_CONFIG && APP_CONFIG.labels && APP_CONFIG.labels.length ? APP_CONFIG.labels : 'Lithium,NiMH,NiCd,Lead,Alkaline,Zinc-Carbon,Zinc-Air,Silver,Mercury,Arsenic,Unknown,Data Error'.split(','); },
 };
 
 let state = {
@@ -317,6 +314,7 @@ async function loadConfig(accessToken) {
     APP_CONFIG = {
       labelingSheetId: cfg.labeling_sheet_id,
       adminEmails:     cfg.admin_emails.split(',').map(e => e.trim()).filter(Boolean),
+      labels:          (cfg.labels||'').split(',').map(e => e.trim()).filter(Boolean),
     };
   } catch(e) { console.warn('Config load failed, using defaults:', e.message); }
 }
@@ -423,20 +421,24 @@ async function submitTask(rowIndex, fields, timeTaken) {
 }
 
 async function updateAnnotatorRecord(email, timeTaken) {
-  // Simple increment — double-fire prevented by _submitting guard in handleSubmit
-  const data = await sheetsGet(`${SHEETS.ANNOTATORS}!A:D`);
-  const rows = data.values || [];
-  const now  = new Date().toISOString();
+  // Recount from tasks tab — always in sync with what the counter shows on screen
+  const [annData, taskData] = await Promise.all([
+    sheetsGet(`${SHEETS.ANNOTATORS}!A:D`),
+    sheetsGet(`${SHEETS.TASKS}!I:M`)
+  ]);
+  const annRows   = annData.values  || [];
+  const taskRows  = taskData.values || [];
+  const myTasks   = taskRows.slice(1).filter(r => r[0] === email && r[1] === 'complete');
+  const completed = myTasks.length;
+  const totalSec  = myTasks.reduce((s, r) => s + (parseInt(r[4]) || 0), 0);
+  const now       = new Date().toISOString();
   let rowIdx = -1;
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] === email) { rowIdx = i + 1; break; }
+  for (let i = 1; i < annRows.length; i++) {
+    if (annRows[i][0] === email) { rowIdx = i + 1; break; }
   }
   if (rowIdx === -1) {
-    await sheetsAppend(`${SHEETS.ANNOTATORS}!A:D`, [[email, 1, timeTaken, now]]);
+    await sheetsAppend(`${SHEETS.ANNOTATORS}!A:D`, [[email, completed, totalSec, now]]);
   } else {
-    const prev = rows[rowIdx - 1];
-    const completed = (parseInt(prev[1]) || 0) + 1;
-    const totalSec  = (parseInt(prev[2]) || 0) + timeTaken;
     await sheetsUpdate(`${SHEETS.ANNOTATORS}!A${rowIdx}:D${rowIdx}`, [[email, completed, totalSec, now]]);
   }
 }
@@ -758,6 +760,16 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-signin').addEventListener('click', () => window._tc.requestAccessToken({ prompt: 'select_account' }));
   document.getElementById('btn-logout').addEventListener('click', signOut);
   document.getElementById('btn-signin-again').addEventListener('click', () => showScreen('login'));
+
+  // Build label dropdown from config
+  (function buildLabelDropdown(){
+    const sel = document.getElementById('field-label');
+    CONFIG.LABELS.forEach(l => {
+      const o = document.createElement('option');
+      o.value = o.textContent = l;
+      sel.appendChild(o);
+    });
+  })();
 
   // Label conditional logic
   document.getElementById('field-label').addEventListener('change', e => {
