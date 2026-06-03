@@ -388,6 +388,7 @@ const CONFIG_SHEET_ID = '1axlYSB3d5H0tDO4M_UA73QmKUY60xkzTrUi2Wfz1cls';
 const CONFIG_DEFAULTS = {
   admin_emails:                  'ayush.siddhi@cloudfactory.com, robina@cloudfactory.com',
   reviewer_emails:               '',
+  labels:                        'Lithium,NiMH,NiCd,Lead,Alkaline,Zinc-Carbon,Zinc-Air,Silver,Mercury,Arsenic,Unknown,Data Error',
   reviewer_emails:               '',
   labeling_sheet_id:             '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
   assessment_sheet_id:           '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE',
@@ -437,6 +438,7 @@ function parseConfig(raw) {
   return {
     // Auth
     adminEmails:    raw.admin_emails.split(',').map(e => e.trim()).filter(Boolean),
+    labels:         (raw.labels||'').split(',').map(e=>e.trim()).filter(Boolean),
   reviewerEmails: (raw.reviewer_emails||'').split(',').map(e => e.trim()).filter(Boolean),
 
     // Sheet IDs per app
@@ -474,6 +476,7 @@ const CONFIG = {
   get SHEET_ID()              { return APP_CONFIG ? APP_CONFIG.consensusSheetId : '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U'; },
   get LABELING_SHEET_ID()     { return APP_CONFIG ? APP_CONFIG.labelingSheetId   : '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U'; },
   get ADMIN_EMAILS()          { return APP_CONFIG ? APP_CONFIG.adminEmails : ['ayush.siddhi@cloudfactory.com']; },
+  get LABELS()        { return APP_CONFIG && APP_CONFIG.labels && APP_CONFIG.labels.length ? APP_CONFIG.labels : 'Lithium,NiMH,NiCd,Lead,Alkaline,Zinc-Carbon,Zinc-Air,Silver,Mercury,Arsenic,Unknown,Data Error'.split(','); },
   set ADMIN_EMAILS(v)         { if (APP_CONFIG) APP_CONFIG.adminEmails = v; },
   get REVIEWER_EMAILS()       { return APP_CONFIG ? APP_CONFIG.reviewerEmails : REVIEWER_EMAILS_FALLBACK; },
   get FLAG_THRESHOLD()        { return APP_CONFIG ? parseInt(APP_CONFIG.consensusFlagThreshold)    : 2; },
@@ -701,6 +704,7 @@ function getStratum(r){
   if(label==='Lead')         return 'Lead';
   if(label==='Alkaline')     return 'Alkaline';
   if(label==='Zinc-Carbon')  return 'Zinc-Carbon';
+  if(label==='Zinc-Air')     return 'Zinc-Air';
   if(label==='Mercury')      return 'Mercury';
   if(label==='Unknown')      return 'Unknown';
   if(label==='Lithium'){
