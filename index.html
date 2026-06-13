@@ -177,29 +177,33 @@ tr:hover td{background:rgba(255,255,255,.02)}
       <label>Evidence URL <span style="color:var(--text-dim);font-size:10px;text-transform:none;letter-spacing:0">(optional)</span></label>
       <textarea id="field-evidence-url" placeholder="https://…" style="min-height:36px;font-family:var(--mono);font-size:12px"></textarea>
     </div>
-    <div class="field-group">
-      <label>Text / Logo Visible</label>
-      <label class="checkbox-field" for="field-visible">
-        <input type="checkbox" id="field-visible">
-        <span>The battery type text or logo is clearly visible in the image</span>
-      </label>
+    <!-- Text/Logo + Image Missing side by side -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field-group" style="margin-bottom:0">
+        <label>Text / Logo Visible</label>
+        <label class="checkbox-field" for="field-visible">
+          <input type="checkbox" id="field-visible">
+          <span>Text or logo clearly visible</span>
+        </label>
+      </div>
+      <div class="field-group" style="margin-bottom:0">
+        <label style="color:var(--warn)">Image(s) Missing Battery</label>
+        <label class="checkbox-field" for="field-product-missing" style="border-color:var(--warn-dim)">
+          <input type="checkbox" id="field-product-missing">
+          <span>Battery missing in one or more images</span>
+        </label>
+      </div>
     </div>
-    <div class="field-group">
-      <label>Product missing in image</label>
-      <label class="checkbox-field" for="field-product-missing">
-        <input type="checkbox" id="field-product-missing">
-        <span>Product is missing in one or more camera images</span>
-      </label>
-      <div id="camera-select-wrap" style="display:none;margin-top:8px;display:none">
-        <label style="font-size:10px;margin-bottom:6px">Select cameras where product is missing</label>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CT1"><input type="checkbox" id="cam-CT1" value="CT1"> CT1</label>
-          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CR1"><input type="checkbox" id="cam-CR1" value="CR1"> CR1</label>
-          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CL1"><input type="checkbox" id="cam-CL1" value="CL1"> CL1</label>
-          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CFR1"><input type="checkbox" id="cam-CFR1" value="CFR1"> CFR1</label>
-          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CBK1"><input type="checkbox" id="cam-CBK1" value="CBK1"> CBK1</label>
-          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CB1"><input type="checkbox" id="cam-CB1" value="CB1"> CB1</label>
-        </div>
+    <!-- Camera selector — shown when product missing is checked -->
+    <div id="camera-select-wrap" style="display:none;background:var(--warn-dim);border:1px solid rgba(245,166,35,.25);border-radius:6px;padding:12px 14px;margin-top:4px">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--warn);letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px">Select camera(s) where battery is missing</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        <label class="checkbox-field" style="padding:8px 10px;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:600" for="cam-CT1"><input type="checkbox" id="cam-CT1" value="CT1"> CT1</label>
+        <label class="checkbox-field" style="padding:8px 10px;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:600" for="cam-CR1"><input type="checkbox" id="cam-CR1" value="CR1"> CR1</label>
+        <label class="checkbox-field" style="padding:8px 10px;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:600" for="cam-CL1"><input type="checkbox" id="cam-CL1" value="CL1"> CL1</label>
+        <label class="checkbox-field" style="padding:8px 10px;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:600" for="cam-CFR1"><input type="checkbox" id="cam-CFR1" value="CFR1"> CFR1</label>
+        <label class="checkbox-field" style="padding:8px 10px;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:600" for="cam-CBK1"><input type="checkbox" id="cam-CBK1" value="CBK1"> CBK1</label>
+        <label class="checkbox-field" style="padding:8px 10px;justify-content:center;font-family:var(--mono);font-size:13px;font-weight:600" for="cam-CB1"><input type="checkbox" id="cam-CB1" value="CB1"> CB1</label>
       </div>
     </div>
     <div class="field-group">
