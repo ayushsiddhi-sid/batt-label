@@ -185,6 +185,24 @@ tr:hover td{background:rgba(255,255,255,.02)}
       </label>
     </div>
     <div class="field-group">
+      <label>Product missing in image</label>
+      <label class="checkbox-field" for="field-product-missing">
+        <input type="checkbox" id="field-product-missing">
+        <span>Product is missing in one or more camera images</span>
+      </label>
+      <div id="camera-select-wrap" style="display:none;margin-top:8px;display:none">
+        <label style="font-size:10px;margin-bottom:6px">Select cameras where product is missing</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CT1"><input type="checkbox" id="cam-CT1" value="CT1"> CT1</label>
+          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CR1"><input type="checkbox" id="cam-CR1" value="CR1"> CR1</label>
+          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CL1"><input type="checkbox" id="cam-CL1" value="CL1"> CL1</label>
+          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CFR1"><input type="checkbox" id="cam-CFR1" value="CFR1"> CFR1</label>
+          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CBK1"><input type="checkbox" id="cam-CBK1" value="CBK1"> CBK1</label>
+          <label class="checkbox-field" style="padding:5px 10px;flex:none" for="cam-CB1"><input type="checkbox" id="cam-CB1" value="CB1"> CB1</label>
+        </div>
+      </div>
+    </div>
+    <div class="field-group">
       <label>Needs Review</label>
       <label class="checkbox-field" for="field-needs-review">
         <input type="checkbox" id="field-needs-review">
@@ -407,13 +425,14 @@ async function submitTask(rowIndex, fields, timeTaken) {
     return urls.length === 1 ? `=HYPERLINK("${urls[0]}","${urls[0]}")` : urls.join('\n');
   })();
 
-  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:M${rowIndex}`, [[
+  await sheetsUpdate(`${SHEETS.TASKS}!B${rowIndex}:N${rowIndex}`, [[
     fields.label, fields.sublabel || '', fields.lfp || '',
     fields.evidence, urlVal,
     fields.text_logo_visible ? 'Yes' : '',
     fields.needs_review ? 'Yes' : '',
     state.user.email, 'complete', '',
-    new Date().toISOString(), timeTaken
+    new Date().toISOString(), timeTaken,
+    fields.missing_cameras || ''
   ]]);
 
   // Update annotator record (fire-and-forget)
@@ -467,7 +486,9 @@ function stopTimer() {
 function resetForm() {
   ['field-label','field-sublabel','field-lfp'].forEach(id => document.getElementById(id).value = '');
   ['field-evidence','field-evidence-url'].forEach(id => document.getElementById(id).value = '');
-  ['field-visible','field-needs-review'].forEach(id => document.getElementById(id).checked = false);
+  ['field-visible','field-needs-review','field-product-missing'].forEach(id => document.getElementById(id).checked = false);
+  document.getElementById('camera-select-wrap').style.display = 'none';
+  document.querySelectorAll('#camera-select-wrap input[type=checkbox]').forEach(c=>c.checked=false);
   document.getElementById('lithium-fields').classList.remove('visible');
   document.getElementById('lfp-field').classList.remove('visible');
   document.getElementById('template-hint').style.display = 'none';
@@ -481,6 +502,17 @@ async function loadNextTask() {
     state.currentTask = task;
     showScreen('annotate');
     resetForm();
+
+    // Rebuild label dropdown from config (deferred until config is loaded)
+    const labelSel = document.getElementById('field-label');
+    if (labelSel && labelSel.options.length <= 1) {
+      CONFIG.LABELS.forEach(l => {
+        const o = document.createElement('option');
+        o.value = o.textContent = l;
+        labelSel.appendChild(o);
+      });
+    }
+
     document.getElementById('display-battery-id').textContent = task.batteryId;
     // Update progress from data already returned — no extra API calls
     const pct = task.totalTasks ? Math.round(task.myCompleted / task.totalTasks * 100) : 0;
@@ -515,6 +547,8 @@ async function handleSubmit(stopAfter = false) {
   const timeTaken = stopTimer();
   setLoading(true, 'Saving annotation…');
   try {
+    const missingCams = [...document.querySelectorAll('#camera-select-wrap input[type=checkbox]:checked')]
+      .map(c => c.value).join(', ');
     await submitTask(state.currentTask.rowIndex, {
       label,
       sublabel:          document.getElementById('field-sublabel').value,
@@ -523,6 +557,7 @@ async function handleSubmit(stopAfter = false) {
       evidence_url:      document.getElementById('field-evidence-url').value.trim(),
       text_logo_visible: document.getElementById('field-visible').checked,
       needs_review:      document.getElementById('field-needs-review').checked,
+      missing_cameras:   missingCams,
     }, timeTaken);
     if (stopAfter) { showScreen('goodbye'); }
     else { showToast('Saved! Loading next task…'); await loadNextTask(); }
@@ -672,7 +707,7 @@ async function initializeSheet() {
       await sheetsUpdate(`${SHEETS.TASKS}!A1`, [[
         'battery_id','label','sublabel','lfp','evidence','evidence_url',
         'text_logo_visible','needs_review','assigned_to','status',
-        'assigned_at','submitted_at','time_taken_seconds','source_sheet'
+        'assigned_at','submitted_at','time_taken_seconds','missing_cameras'
       ]]);
     }
     const aData = await sheetsGet(`${SHEETS.ANNOTATORS}!A1:D1`);
@@ -721,10 +756,11 @@ const TEMPLATES = [
   { group:'Web search',         label:'Web search — chemistry unclear', text:'[product] found online. Available in [chemistry 1] and [chemistry 2] variants. Chemistry unconfirmed — marked for review.' },
   { group:'Multiple batteries', label:'Multiple — same chemistry',      text:'Multiple batteries in image. All identified to be of [chemistry]; Logo/text visible on [cam].jpg.' },
   { group:'Multiple batteries', label:'Multiple — different chemistry', text:'Multiple batteries visible in image with different compositions: [chemistry 1] on [cam].jpg and [chemistry 2] on [cam].jpg. Cannot confirm single label — marked as unknown.' },
-  { group:'Unknown / errors',   label:'Unknown / cannot confirm',       text:'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
-  { group:'Unknown / errors',   label:'Data error — non-battery item',  text:'Data error — non-battery item in image. Marked as data error.' },
-  { group:'Unknown / errors',   label:'Data error — product missing',   text:'Data error — product missing in [cam].jpg. Marked as data error.' },
-  { group:'Unknown / errors',   label:'Data error — product mismatch',  text:'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
+  { group:'Unknown / errors',   label:'Unknown / cannot confirm',             text:'Unable to confirm battery type. [label obscured / distorted image / no visible markings].' },
+  { group:'Unknown / errors',   label:'Unknown / fully wrapped',               text:'Unknown — Cannot determine if there is a battery. Item is fully wrapped.' },
+  { group:'Unknown / errors',   label:'Unknown / dataset folder missing',       text:'Unknown — Dataset folder missing.' },
+  { group:'Unknown / errors',   label:'Data error — non-battery item',          text:'Non-battery item in [cam].' },
+  { group:'Unknown / errors',   label:'Data error — product mismatch',          text:'Data error — product in [cam] differs from other images in dataset. Marked as data error.' },
 ];
 
 function buildTemplateHTML() {
@@ -761,17 +797,13 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-logout').addEventListener('click', signOut);
   document.getElementById('btn-signin-again').addEventListener('click', () => showScreen('login'));
 
-  // Build label dropdown from config
-  (function buildLabelDropdown(){
-    const sel = document.getElementById('field-label');
-    CONFIG.LABELS.forEach(l => {
-      const o = document.createElement('option');
-      o.value = o.textContent = l;
-      sel.appendChild(o);
-    });
-  })();
-
   // Label conditional logic
+  // Show/hide camera selector when product missing is checked
+  document.getElementById('field-product-missing').addEventListener('change', function(){
+    document.getElementById('camera-select-wrap').style.display = this.checked ? '' : 'none';
+    if(!this.checked) document.querySelectorAll('#camera-select-wrap input[type=checkbox]').forEach(c=>c.checked=false);
+  });
+
   document.getElementById('field-label').addEventListener('change', e => {
     const isLi = e.target.value === 'Lithium';
     document.getElementById('lithium-fields').classList.toggle('visible', isLi);
