@@ -401,6 +401,7 @@ const CONFIG_DEFAULTS = {
   labels:                        'Lithium,NiMH,NiCd,Lead,Alkaline,Zinc-Carbon,Zinc-Air,Silver,Mercury,Arsenic,Unknown,Data Error',
   reviewer_emails:               '',
   labeling_sheet_id:             '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
+  consensus_labeling_sheet_id:   '',
   assessment_sheet_id:           '1o1Xd0KOIwmHSwf9KhF6UR8DzQV6mj7fEuUQjpUb1NWE',
   consensus_sheet_id:            '1iQ7-zWXr39rz06i78cijr61WFBBeoYAJ2ppCBr6qa2U',
   assessment_version:            'v1',
@@ -452,7 +453,9 @@ function parseConfig(raw) {
   reviewerEmails: (raw.reviewer_emails||'').split(',').map(e => e.trim()).filter(Boolean),
 
     // Sheet IDs per app
-    labelingSheetId:    raw.labeling_sheet_id,
+    // Use consensus_labeling_sheet_id if set — allows consensus to run on old batch
+    // while annotators work on new batch via labeling_sheet_id
+    labelingSheetId:    raw.consensus_labeling_sheet_id || raw.labeling_sheet_id,
     assessmentSheetId:  raw.assessment_sheet_id,
     consensusSheetId:   raw.consensus_sheet_id,
 
@@ -1458,7 +1461,7 @@ function renderDisagreementCards(pairs){
           ${p2Lfp?`<div class="dis-field"><div class="dis-field-lbl">LFP</div><div class="dis-field-val ${lfpDiff?'diff':''}">${p2Lfp}</div></div>`:''}
           <div class="dis-field"><div class="dis-field-lbl">Evidence</div>
             <div style="font-size:12px;color:var(--text-muted);line-height:1.5;white-space:normal">${p2Ev}
-              ${p2EvUrl ? `<a href="${p2EvUrl.replace(/=HYPERLINK\("([^"]+)".*/,'$1')}" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono);margin-left:4px">↗ link</a>` : ''}
+              ${p2EvUrl ? `<a href="${(()=>{const m=p2EvUrl.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);return m?m[1]:p2EvUrl.startsWith('http')?p2EvUrl:'';})()}" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono);margin-left:4px">↗ link</a>` : ''}
             </div></div>
         </div>
       </div>
@@ -1493,10 +1496,11 @@ function renderDisagreementCards(pairs){
     const ev = _p1EvidenceMap[batteryId] || {};
     let html = ev.evidence || '<span style="color:var(--text-dim)">—</span>';
     if(ev.evidenceUrl){
-      const rawUrl = String(ev.evidenceUrl);
-      const m = rawUrl.match(/=HYPERLINK\("([^"]+)"/);
-      const url = m ? m[1] : rawUrl;
-      if(url && url.startsWith('http')){
+      const rawUrl = String(ev.evidenceUrl).trim();
+      // Strip HYPERLINK formula: =HYPERLINK("url","label") or =HYPERLINK("url")
+      const m = rawUrl.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+      const url = m ? m[1] : (rawUrl.startsWith('http') ? rawUrl : '');
+      if(url){
         html += ' <a href="'+url+'" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono)">↗ link</a>';
       }
     }
@@ -1507,8 +1511,8 @@ function renderDisagreementCards(pairs){
     if(goldEvEl && !goldEvEl.value) goldEvEl.value = ev.evidence || '';
     const goldEvUrlEl = document.getElementById('gold-ev-url-'+i);
     if(goldEvUrlEl && !goldEvUrlEl.value && ev.evidenceUrl){
-      const raw = String(ev.evidenceUrl);
-      const m = raw.match(/HYPERLINK\("([^"]+)"/);
+      const raw = String(ev.evidenceUrl).trim();
+      const m = raw.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
       goldEvUrlEl.value = m ? m[1] : (raw.startsWith('http') ? raw : '');
     }
     // Re-apply staged visual state if this card was already staged
