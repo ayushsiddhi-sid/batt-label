@@ -228,7 +228,9 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
       <label class="checkbox-label"><input type="checkbox" id="field-needs-review"> Needs review</label>
     </div>
     <div class="form-actions">
-      <button class="btn-primary" id="btn-submit">Submit →</button>
+      <button class="btn-primary" id="btn-submit">Submit &amp; Next →</button>
+      <button class="btn-secondary" id="btn-submit-stop">Submit &amp; Stop</button>
+      <span class="timer-badge" id="timer-display">00:00</span>
     </div>
   </div>
 </div>
@@ -270,6 +272,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     <div class="admin-btn-row">
       <button class="btn-secondary" id="btn-refresh">↻ Refresh</button>
       <button class="btn-secondary" id="btn-add-tasks">+ Add tasks</button>
+      <button class="btn-secondary" id="btn-goto-disagree">⚑ Set gold standard</button>
       <button class="btn-primary" id="btn-back-to-task" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)">← Back to tasks</button>
     </div>
   </div>
@@ -367,6 +370,17 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     <div style="display:none"><!-- dummy close --></div>
     </div>
     <div id="dis-list"></div>
+  </div>
+</div>
+<!-- GOODBYE -->
+<div class="screen" id="screen-goodbye">
+  <div style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 56px)">
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:48px;max-width:480px;text-align:center">
+      <div style="font-size:32px;margin-bottom:16px">◎</div>
+      <div style="font-family:var(--mono);font-size:18px;font-weight:600;color:var(--accent);margin-bottom:8px">Session ended</div>
+      <p style="color:var(--text-muted);font-size:13px;line-height:1.6">Your last task has been submitted. Come back anytime to continue.</p>
+      <button class="btn-primary" id="btn-signin-again" style="margin-top:24px;width:100%">Continue labeling →</button>
+    </div>
   </div>
 </div>
 </main>
@@ -911,12 +925,13 @@ async function submitTask(rowIndex,fields,timeTaken){
     (task.origLfp||'').trim().toLowerCase()===(fields.lfp||'').trim().toLowerCase();
   const consensus=agree?'agree':'disagree';
 
-  // Single write — H:S
-  await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:S${rowIndex}`,[[    state.user.email,'complete','',
+  // Single write — H:T (T = missing_cameras for pass-2)
+  await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:T${rowIndex}`,[[    state.user.email,'complete','',
     fields.label,fields.sublabel||'',fields.lfp||'',
     fields.evidence,fields.evidence_url||'',
     fields.text_logo_visible?'Yes':'',
-    new Date().toISOString(),timeTaken,consensus
+    new Date().toISOString(),timeTaken,consensus,
+    fields.missing_cameras||''
   ]]);
 
   // Update annotator record — awaited so errors surface, but failure won't block
@@ -1034,13 +1049,13 @@ async function loadAdminDashboard(){
       switchTab('disagree');
     }
     const [cData,aData,tData]=await Promise.all([
-      sheetsGet(`${SHEETS.CONSENSUS}!A:AA`),
+      sheetsGet(`${SHEETS.CONSENSUS}!A:AB`),
       sheetsGet(`${SHEETS.ANN}!A:J`),
       labelingGet(`${SHEETS.TASKS}!A:F`)
     ]);
     const cRows=(cData.values||[]).slice(1)
       .filter(r=>r[0])
-      .map(r=>{ while(r.length<27) r.push(''); return r; });
+      .map(r=>{ while(r.length<28) r.push(''); return r; });
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
     // Build pass-1 evidence lookup: battery_id → {evidence, evidenceUrl}
     // Key by battery_id — prefer rows with actual evidence content
@@ -1157,9 +1172,9 @@ function renderCW(aRows, cRows){
     } else {
       annStats[p1ann].disagreed++;
       // Check if gold has been set (col Z = pass1_correct, index 25)
-      while(r.length<27) r.push('');
-      if(r[25]==='Yes')       annStats[p1ann].p1Correct++;
-      else if(r[25]==='No')   annStats[p1ann].p1Wrong++;
+      while(r.length<28) r.push('');
+      if(r[26]==='Yes')       annStats[p1ann].p1Correct++;
+      else if(r[26]==='No')   annStats[p1ann].p1Wrong++;
       else                    annStats[p1ann].p1Pending++;
     }
   });
@@ -1176,9 +1191,9 @@ function renderCW(aRows, cRows){
     if(r[18]==='agree'){
       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
     } else {
-      while(r.length<27) r.push('');
-      if(r[26]==='Yes')       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
-      else if(r[26]==='No')   annStats[p2ann].p2Wrong   = (annStats[p2ann].p2Wrong||0)   + 1;
+      while(r.length<28) r.push('');
+      if(r[27]==='Yes')       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
+      else if(r[27]==='No')   annStats[p2ann].p2Wrong   = (annStats[p2ann].p2Wrong||0)   + 1;
       else                    annStats[p2ann].p2Pending  = (annStats[p2ann].p2Pending||0)  + 1;
     }
   });
@@ -1248,7 +1263,7 @@ function renderDisagreements(rows, p1EvidenceMap={}){
   // Build pairs with rowNum directly — avoids O(n²) indexOf scan
   _allDisPairs=[];
   rows.forEach((r,i)=>{
-    if(r[18]==='disagree') _allDisPairs.push({r, gold:r[19]||'', stratum:r[5]||'', batteryId:r[0], rowNum:i+2});
+    if(r[18]==='disagree') _allDisPairs.push({r, gold:r[20]||'', stratum:r[5]||'', batteryId:r[0], rowNum:i+2});
   });
 
   // Populate stratum filter
@@ -1405,7 +1420,7 @@ function renderDisagreementCards(pairs){
       : (p2Lfp && p2Lfp.toLowerCase()!=='unknown') ? p2Lfp 
       : (p1Lfp && p1Lfp.toLowerCase()!=='unknown') ? p1Lfp 
       : savedLfp;
-    const goldBy  = (r[22]||'').split('@')[0];
+    const goldBy  = (r[23]||'').split('@')[0];
     // Show sublabel whenever either annotator used Lithium
     const showSub = effectiveGold.toLowerCase()==='lithium' ||
                     p1Label.toLowerCase()==='lithium' ||
@@ -1421,8 +1436,8 @@ function renderDisagreementCards(pairs){
       goldLfp.toLowerCase()===(p1Lfp||'').toLowerCase()
     );
     // Pre-fill evidence: saved gold → pass-1 evidence (from tasks tab) → pass-2 evidence
-    const savedGoldEv    = r[23]||'';
-    const savedGoldEvUrl = r[24]||'';
+    const savedGoldEv    = r[24]||'';
+    const savedGoldEvUrl = r[25]||'';
     const p1EvData       = _p1EvidenceMap ? (_p1EvidenceMap[r[0]]||{}) : {};
     const goldEvidence    = savedGoldEv || p1EvData.evidence || (p2Ev !== '—' ? p2Ev : '');
     const goldEvidenceUrl = savedGoldEvUrl || p1EvData.evidenceUrl || (p2EvUrl||'');
@@ -1463,6 +1478,7 @@ function renderDisagreementCards(pairs){
             <div style="font-size:12px;color:var(--text-muted);line-height:1.5;white-space:normal">${p2Ev}
               ${p2EvUrl ? `<a href="${(()=>{const m=p2EvUrl.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);return m?m[1]:p2EvUrl.startsWith('http')?p2EvUrl:'';})()}" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono);margin-left:4px">↗ link</a>` : ''}
             </div></div>
+          ${r[19] ? `<div class="dis-field"><div class="dis-field-lbl" style="color:var(--warn)">Images missing</div><div style="font-family:var(--mono);font-size:12px;color:var(--warn)">${r[19]}</div></div>` : ''}
         </div>
       </div>
       <div class="gold-form">
@@ -1509,6 +1525,13 @@ function renderDisagreementCards(pairs){
     // Also populate gold evidence textarea + URL with correct annotator evidence
     const goldEvEl = document.getElementById('gold-ev-'+i);
     if(goldEvEl && !goldEvEl.value) goldEvEl.value = ev.evidence || '';
+    // Pass-1 missing cameras
+    const p1MissingEl = document.getElementById('p1-missing-'+i);
+    const p1MissingWrap = document.getElementById('p1-missing-wrap-'+i);
+    if(p1MissingEl && ev.missingCameras){
+      p1MissingEl.textContent = ev.missingCameras;
+      if(p1MissingWrap) p1MissingWrap.style.display='';
+    }
     const goldEvUrlEl = document.getElementById('gold-ev-url-'+i);
     if(goldEvUrlEl && !goldEvUrlEl.value && ev.evidenceUrl){
       const raw = String(ev.evidenceUrl).trim();
@@ -1631,7 +1654,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
       // Queue consensus_tasks write
       consensusWrites.push(()=>sheetsUpdate(
-        `${SHEETS.CONSENSUS}!T${rn}:AA${rn}`,
+        `${SHEETS.CONSENSUS}!U${rn}:AB${rn}`,
         [[gold, goldSub, goldLfp, state.user.email, goldEv, goldEvUrl, pass1Correct, pass2Correct]]
       ));
 
@@ -1820,14 +1843,14 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // Submit — debounced
   let _submitting=false;
-  document.getElementById('btn-submit').addEventListener('click',async()=>{
+  async function handleConsensusSubmit(stopAfter=false){
     if(_submitting) return;
     const label=document.getElementById('field-label').value;
     const evidence=document.getElementById('field-evidence').value.trim();
     if(!label){ showToast('Select a label','error'); return; }
     if(!evidence){ showToast('Evidence is required','error'); return; }
     _submitting=true;
-    const btn=document.getElementById('btn-submit');
+    const btn=document.getElementById(stopAfter?'btn-submit-stop':'btn-submit');
     btn.disabled=true; btn.textContent='Submitting…';
     const timeTaken=stopTimer();
     try {
@@ -1842,17 +1865,24 @@ document.addEventListener('DOMContentLoaded',()=>{
         missing_cameras: [...document.querySelectorAll('#camera-select-wrap input[type=checkbox]:checked')].map(c=>c.value).join(', '),
       };
       await submitTask(state.currentTask.rowIndex, fields, timeTaken);
-      // Reset button before loading next task so it never appears stuck
-      btn.disabled=false; btn.textContent='Submit →';
+      btn.disabled=false; btn.textContent=stopAfter?'Submit & Stop':'Submit & Next →';
       _submitting=false;
-      await loadNextTask();
+      if(stopAfter){ showScreen('goodbye'); }
+      else { await loadNextTask(); }
     } catch(e){
       console.error('Submit error:', e);
       showToast('Submit failed: ' + (e.message||'Unknown error'), 'error');
-      btn.disabled=false; btn.textContent='Submit →';
+      btn.disabled=false; btn.textContent=stopAfter?'Submit & Stop':'Submit & Next →';
       _submitting=false;
     }
+  }
+
+  document.getElementById('btn-submit').addEventListener('click',async()=>{
+    handleConsensusSubmit(false);
   });
+
+  document.getElementById('btn-submit-stop').addEventListener('click',()=>handleConsensusSubmit(true));
+  document.getElementById('btn-signin-again').addEventListener('click',()=>loadNextTask());
 
   // Admin toggle
   document.getElementById('btn-admin-toggle').addEventListener('click',()=>{
@@ -1867,6 +1897,9 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
   });
 
+  document.getElementById('btn-goto-disagree').addEventListener('click',()=>{
+    switchTab('disagree');
+  });
   document.getElementById('btn-back-to-task').addEventListener('click',()=>{
     setLoading(true,'Loading your tasks…');
     loadNextTask();
