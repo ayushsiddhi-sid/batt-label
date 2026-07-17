@@ -1051,7 +1051,7 @@ async function loadAdminDashboard(){
     const [cData,aData,tData]=await Promise.all([
       sheetsGet(`${SHEETS.CONSENSUS}!A:AB`),
       sheetsGet(`${SHEETS.ANN}!A:J`),
-      labelingGet(`${SHEETS.TASKS}!A:F`)
+      labelingGet(`${SHEETS.TASKS}!A:N`)
     ]);
     const cRows=(cData.values||[]).slice(1)
       .filter(r=>r[0])
@@ -1066,7 +1066,7 @@ async function loadAdminDashboard(){
       const hasEvidence = (r[4]||'').trim().length > 0;
       // Only overwrite if new row has evidence and existing doesn't
       if(!existing || (!existing.evidence && hasEvidence)){
-        p1EvidenceMap[r[0]] = {evidence:r[4]||'', evidenceUrl:r[5]||''};
+        p1EvidenceMap[r[0]] = {evidence:r[4]||'', evidenceUrl:r[5]||'', missingCameras:r[13]||''};
       }
     });
 
