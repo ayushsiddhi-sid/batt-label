@@ -911,22 +911,23 @@ async function seedConsensusQueue(){
 // TASK ASSIGNMENT
 // ═══════════════════════════════════════════════════════════════
 async function getOrAssignTask(email){
-  const data = await sheetsGet(`${SHEETS.CONSENSUS}!A:J`);
-  const rows = (data.values||[]).map(r=>{ while(r.length<10) r.push(''); return r; });
+  // Read A:K to get assigned_to(J=9) and status(K=10)
+  const data = await sheetsGet(`${SHEETS.CONSENSUS}!A:K`);
+  const rows = (data.values||[]).map(r=>{ while(r.length<11) r.push(''); return r; });
   if(rows.length < 2) return {notSeeded:true};
 
-  // Resume own in-progress task
+  // Resume own in-progress task — assigned_to=J(9), status=K(10)
   for(let i=1;i<rows.length;i++){
-    if(rows[i][7]===email && rows[i][10]==='in-progress')
-      return {rowIndex:i+1, batteryId:rows[i][0], origLabel:rows[i][1], origSub:rows[i][2], origLfp:rows[i][3], origAnnotator:rows[i][4], stratum:rows[i][5]};
+    if(rows[i][9]===email && rows[i][10]==='in-progress')
+      return {rowIndex:i+1, batteryId:rows[i][0], origLabel:rows[i][1], origSub:rows[i][2], origLfp:rows[i][3], origAnnotator:rows[i][4], stratum:rows[i][7]};
   }
 
-  // Find next unassigned
+  // Find next unassigned — skip tasks where this email did pass-1
   for(let i=1;i<rows.length;i++){
     if(!rows[i][10] || rows[i][10]==='unassigned'){
       const rowNum=i+1;
       await sheetsUpdate(`${SHEETS.CONSENSUS}!J${rowNum}:L${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
-      return {rowIndex:rowNum, batteryId:rows[i][0], origLabel:rows[i][1], origSub:rows[i][2], origLfp:rows[i][3], origAnnotator:rows[i][4], stratum:rows[i][5]};
+      return {rowIndex:rowNum, batteryId:rows[i][0], origLabel:rows[i][1], origSub:rows[i][2], origLfp:rows[i][3], origAnnotator:rows[i][4], stratum:rows[i][7]};
     }
   }
   return {queueDone:true};
