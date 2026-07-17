@@ -1451,8 +1451,8 @@ function renderDisagreementCards(pairs){
     const p1Label=r[1]||'—', p1Sub=r[2]||'', p1Lfp=r[3]||'';
     const p1Annot=(r[4]||'—').split('@')[0];
     const p2Label=r[12]||'—', p2Sub=r[13]||'', p2Lfp=r[14]||'';
-    const p2Ev=r[15]||'—', p2EvUrl=r[16]||'', p2Annot=(r[11]||'—').split('@')[0];
-    const sameAnnotator = r[4] && r[7] && r[4].toLowerCase()===r[7].toLowerCase();
+    const p2Ev=r[15]||'—', p2EvUrl=r[16]||'', p2Annot=(r[9]||'—').split('@')[0];
+    const sameAnnotator = r[4] && r[9] && r[4].toLowerCase()===r[9].toLowerCase();
     const stratum=r[5]||'';
     const gold=r[19]||'';
     // Pre-fill sublabel/lfp from gold if set, otherwise suggest from pass-2 answer
@@ -1621,11 +1621,11 @@ function usePassLabel(idx, pass){
       evUrl = m ? m[1] : (evUrl.startsWith('http') ? evUrl : '');
     }
   } else {
-    label    = r[10]||'';
-    sub      = r[11]||'';
-    lfp      = r[12]||'';
-    evidence = r[13]||'';
-    evUrl    = r[14]||'';
+    label    = r[12]||'';   // M = label (pass2)
+    sub      = r[13]||'';   // N = sublabel
+    lfp      = r[14]||'';   // O = lfp
+    evidence = r[15]||'';   // P = evidence
+    evUrl    = r[16]||'';   // Q = evidence_url
     if(evUrl){
       const m = String(evUrl).match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
       evUrl = m ? m[1] : (evUrl.startsWith('http') ? evUrl : '');
@@ -1743,7 +1743,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       const p1Label  = (r[1]||'').trim().toLowerCase();
       const p1Sub    = (r[2]||'').trim().toLowerCase();
       const p1Lfp    = (r[3]||'').trim().toLowerCase();
-      const p2Label  = (r[10]||'').trim().toLowerCase();
+      const p2Label  = (r[12]||'').trim().toLowerCase();
       const p2Sub    = (r[13]||'').trim().toLowerCase();
       const p2Lfp    = (r[14]||'').trim().toLowerCase();
 
