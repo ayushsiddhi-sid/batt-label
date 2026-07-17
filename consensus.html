@@ -759,7 +759,7 @@ async function seedConsensusQueue(){
   setLoading(true,'Computing sample plan…');
   let _planPreview;
   try {
-    const _tPrev=await labelingGet(`${SHEETS.TASKS}!A:D`);
+    const _tPrev=await labelingGet(`${SHEETS.TASKS}!A:N`);
     const _tRowsPrev=(_tPrev.values||[]).slice(1).filter(r=>r[0]&&r[9]==='complete'||true);
     // Quick stratum count for preview
     const _prevCounts={};
