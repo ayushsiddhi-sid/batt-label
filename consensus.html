@@ -780,7 +780,7 @@ async function seedConsensusQueue(){
     });
     const existingSheets = new Set((metaRes.sheets||[]).map(s=>s.properties.title));
     const CONSENSUS_HEADERS = ['battery_id','original_label','original_sublabel','original_lfp','original_annotator',
-      'stratum','pass1_row','assigned_to','status','assigned_at','label','sublabel','lfp',
+      'original_evidence','original_evidence_url','stratum','pass1_row','assigned_to','status','assigned_at','label','sublabel','lfp',
       'evidence','evidence_url','text_logo_visible','submitted_at','time_taken_seconds',
       'consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by',
       'gold_evidence','gold_evidence_url','pass1_correct','pass2_correct'];
@@ -851,16 +851,20 @@ async function seedConsensusQueue(){
       for(let i=0;i<take;i++){
         const {r,sheetRow}=pool[i];
         toWrite.push([
-          r[0],   // battery_id
-          r[1],   // original_label
-          r[2]||'',r[3]||'', // orig_sub, orig_lfp
-          r[8]||'', // original_annotator (assigned_to col I = index 8)
-          stratum,
-          sheetRow,
-          '','unassigned','',  // assigned_to, status, assigned_at
-          '','','','','','',   // label…text_logo_visible
-          '','',               // submitted_at, time_taken
-          '','',''             // consensus_status, gold_label, gold_set_by
+          r[0],     // battery_id        A
+          r[1],     // original_label    B
+          r[2]||'', // original_sublabel C
+          r[3]||'', // original_lfp      D
+          r[8]||'', // original_annotator E (assigned_to col I = index 8)
+          r[4]||'', // original_evidence F
+          r[5]||'', // original_evidence_url G
+          stratum,  // H
+          sheetRow, // I (pass1_row)
+          '','unassigned','',  // J=assigned_to, K=status, L=assigned_at
+          '','','','','','',   // M=label…R=text_logo_visible
+          '','',               // S=submitted_at, T=time_taken
+          '',                  // U=consensus_status
+          '','',''             // V=gold_label, W=gold_set_by (placeholder)
         ]);
         totalNew++;
       }
@@ -898,15 +902,15 @@ async function getOrAssignTask(email){
 
   // Resume own in-progress task
   for(let i=1;i<rows.length;i++){
-    if(rows[i][7]===email && rows[i][8]==='in-progress')
+    if(rows[i][7]===email && rows[i][10]==='in-progress')
       return {rowIndex:i+1, batteryId:rows[i][0], origLabel:rows[i][1], origSub:rows[i][2], origLfp:rows[i][3], origAnnotator:rows[i][4], stratum:rows[i][5]};
   }
 
   // Find next unassigned
   for(let i=1;i<rows.length;i++){
-    if(!rows[i][8] || rows[i][8]==='unassigned'){
+    if(!rows[i][10] || rows[i][10]==='unassigned'){
       const rowNum=i+1;
-      await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowNum}:J${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
+      await sheetsUpdate(`${SHEETS.CONSENSUS}!J${rowNum}:L${rowNum}`,[[email,'in-progress',new Date().toISOString()]]);
       return {rowIndex:rowNum, batteryId:rows[i][0], origLabel:rows[i][1], origSub:rows[i][2], origLfp:rows[i][3], origAnnotator:rows[i][4], stratum:rows[i][5]};
     }
   }
@@ -926,7 +930,7 @@ async function submitTask(rowIndex,fields,timeTaken){
   const consensus=agree?'agree':'disagree';
 
   // Single write — H:T (T = missing_cameras for pass-2)
-  await sheetsUpdate(`${SHEETS.CONSENSUS}!H${rowIndex}:T${rowIndex}`,[[    state.user.email,'complete','',
+  await sheetsUpdate(`${SHEETS.CONSENSUS}!J${rowIndex}:V${rowIndex}`,[[    state.user.email,'complete','',
     fields.label,fields.sublabel||'',fields.lfp||'',
     fields.evidence,fields.evidence_url||'',
     fields.text_logo_visible?'Yes':'',
@@ -1049,13 +1053,13 @@ async function loadAdminDashboard(){
       switchTab('disagree');
     }
     const [cData,aData,tData]=await Promise.all([
-      sheetsGet(`${SHEETS.CONSENSUS}!A:AB`),
+      sheetsGet(`${SHEETS.CONSENSUS}!A:AD`),
       sheetsGet(`${SHEETS.ANN}!A:J`),
       labelingGet(`${SHEETS.TASKS}!A:N`)
     ]);
     const cRows=(cData.values||[]).slice(1)
       .filter(r=>r[0])
-      .map(r=>{ while(r.length<28) r.push(''); return r; });
+      .map(r=>{ while(r.length<30) r.push(''); return r; });
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
     // Build pass-1 evidence lookup: battery_id → {evidence, evidenceUrl}
     // Key by battery_id — prefer rows with actual evidence content
@@ -1071,12 +1075,12 @@ async function loadAdminDashboard(){
     });
 
     const seeded=cRows.length;
-    const completed=cRows.filter(r=>r[8]==='complete').length;
+    const completed=cRows.filter(r=>r[10]==='complete').length;
     // Exclude same-annotator pairs from accuracy stats
-    const validRows=cRows.filter(r=>r[8]==='complete'&&!(r[4]&&r[7]&&r[4].toLowerCase()===r[7].toLowerCase()));
-    const agreed=validRows.filter(r=>r[18]==='agree').length;
-    const disagreed=validRows.filter(r=>r[18]==='disagree').length;
-    const sameAnnotatorCount=cRows.filter(r=>r[8]==='complete'&&r[4]&&r[7]&&r[4].toLowerCase()===r[7].toLowerCase()).length;
+    const validRows=cRows.filter(r=>r[10]==='complete'&&!(r[4]&&r[7]&&r[4].toLowerCase()===r[7].toLowerCase()));
+    const agreed=validRows.filter(r=>r[20]==='agree').length;
+    const disagreed=validRows.filter(r=>r[20]==='disagree').length;
+    const sameAnnotatorCount=cRows.filter(r=>r[10]==='complete'&&r[4]&&r[7]&&r[4].toLowerCase()===r[7].toLowerCase()).length;
     const pct=completed?Math.round(completed/seeded*100):0;
     const agreeRate=completed?Math.round(agreed/completed*100):0;
 
@@ -1119,7 +1123,7 @@ function renderAccuracy(rows){
     const s=r[5]||'Unknown';
     if(!strata[s]) strata[s]={pool:STRATA_POOLS[s]||0,sampled:0,completed:0,agreed:0,disagreed:0};
     strata[s].sampled++;
-    if(r[8]==='complete'){ strata[s].completed++; if(r[18]==='agree') strata[s].agreed++; else if(r[18]==='disagree') strata[s].disagreed++; }
+    if(r[10]==='complete'){ strata[s].completed++; if(r[20]==='agree') strata[s].agreed++; else if(r[20]==='disagree') strata[s].disagreed++; }
   });
   const tbody=document.getElementById('tbody-accuracy');
   tbody.innerHTML=Object.entries(strata).sort((a,b)=>(b[1].pool||0)-(a[1].pool||0)).map(([s,d])=>{
@@ -1159,22 +1163,22 @@ function renderCW(aRows, cRows){
   // Exclude same-annotator pairs from accuracy stats
   cRows.forEach(r=>{
     const p1ann = r[4];
-    const p2ann = r[7];
+    const p2ann = r[9];
     if(!p1ann || r[8]!=='complete') return;
     // Skip same-annotator — can't be used for accuracy
     if(p1ann && p2ann && p1ann.toLowerCase()===p2ann.toLowerCase()) return;
     if(!annStats[p1ann]) annStats[p1ann]={sampled:0,completed:0,agreed:0,disagreed:0,p1Correct:0,p1Wrong:0,p1Pending:0};
     annStats[p1ann].sampled++;
     annStats[p1ann].completed++;
-    if(r[18]==='agree'){
+    if(r[20]==='agree'){
       annStats[p1ann].agreed++;
       annStats[p1ann].p1Correct++; // agreed = correct for both passes
     } else {
       annStats[p1ann].disagreed++;
       // Check if gold has been set (col Z = pass1_correct, index 25)
-      while(r.length<28) r.push('');
-      if(r[26]==='Yes')       annStats[p1ann].p1Correct++;
-      else if(r[26]==='No')   annStats[p1ann].p1Wrong++;
+      while(r.length<30) r.push('');
+      if(r[28]==='Yes')       annStats[p1ann].p1Correct++;
+      else if(r[28]==='No')   annStats[p1ann].p1Wrong++;
       else                    annStats[p1ann].p1Pending++;
     }
   });
@@ -1182,18 +1186,18 @@ function renderCW(aRows, cRows){
   // Process pass-2 annotators (assigned_to = col H, index 7)
   // Exclude same-annotator pairs from accuracy stats
   cRows.forEach(r=>{
-    const p2ann = r[7];
+    const p2ann = r[9];
     if(!p2ann || r[8]!=='complete') return;
     // Skip same-annotator
     if(r[4] && p2ann && r[4].toLowerCase()===p2ann.toLowerCase()) return;
     if(!annStats[p2ann]) annStats[p2ann]={sampled:0,completed:0,agreed:0,disagreed:0,p2Correct:0,p2Wrong:0,p2Pending:0};
     // Don't double-count sampled/completed for pass-2
-    if(r[18]==='agree'){
+    if(r[20]==='agree'){
       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
     } else {
-      while(r.length<28) r.push('');
-      if(r[27]==='Yes')       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
-      else if(r[27]==='No')   annStats[p2ann].p2Wrong   = (annStats[p2ann].p2Wrong||0)   + 1;
+      while(r.length<30) r.push('');
+      if(r[29]==='Yes')       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
+      else if(r[29]==='No')   annStats[p2ann].p2Wrong   = (annStats[p2ann].p2Wrong||0)   + 1;
       else                    annStats[p2ann].p2Pending  = (annStats[p2ann].p2Pending||0)  + 1;
     }
   });
@@ -1263,7 +1267,7 @@ function renderDisagreements(rows, p1EvidenceMap={}){
   // Build pairs with rowNum directly — avoids O(n²) indexOf scan
   _allDisPairs=[];
   rows.forEach((r,i)=>{
-    if(r[18]==='disagree') _allDisPairs.push({r, gold:r[20]||'', stratum:r[5]||'', batteryId:r[0], rowNum:i+2});
+    if(r[20]==='disagree') _allDisPairs.push({r, gold:r[22]||'', stratum:r[7]||'', batteryId:r[0], rowNum:i+2});
   });
 
   // Populate stratum filter
@@ -1317,6 +1321,8 @@ async function addSpecificTasks(){
         r[2]||'',       // original_sublabel
         r[3]||'',       // original_lfp
         r[8]||'',       // original_annotator
+        r[4]||'',       // original_evidence
+        r[5]||'',       // original_evidence_url
         getStratum(r),  // stratum
         sheetRow,       // pass1_row
         '','unassigned','',
@@ -1404,8 +1410,8 @@ function renderDisagreementCards(pairs){
     const origAnnot=(r[4]||'—').split('@')[0];
     const p1Label=r[1]||'—', p1Sub=r[2]||'', p1Lfp=r[3]||'';
     const p1Annot=(r[4]||'—').split('@')[0];
-    const p2Label=r[10]||'—', p2Sub=r[11]||'', p2Lfp=r[12]||'';
-    const p2Ev=r[13]||'—', p2EvUrl=r[14]||'', p2Annot=(r[7]||'—').split('@')[0];
+    const p2Label=r[12]||'—', p2Sub=r[13]||'', p2Lfp=r[14]||'';
+    const p2Ev=r[15]||'—', p2EvUrl=r[16]||'', p2Annot=(r[11]||'—').split('@')[0];
     const sameAnnotator = r[4] && r[7] && r[4].toLowerCase()===r[7].toLowerCase();
     const stratum=r[5]||'';
     const gold=r[19]||'';
@@ -1420,7 +1426,7 @@ function renderDisagreementCards(pairs){
       : (p2Lfp && p2Lfp.toLowerCase()!=='unknown') ? p2Lfp 
       : (p1Lfp && p1Lfp.toLowerCase()!=='unknown') ? p1Lfp 
       : savedLfp;
-    const goldBy  = (r[23]||'').split('@')[0];
+    const goldBy  = (r[25]||'').split('@')[0];
     // Show sublabel whenever either annotator used Lithium
     const showSub = effectiveGold.toLowerCase()==='lithium' ||
                     p1Label.toLowerCase()==='lithium' ||
@@ -1436,8 +1442,8 @@ function renderDisagreementCards(pairs){
       goldLfp.toLowerCase()===(p1Lfp||'').toLowerCase()
     );
     // Pre-fill evidence: saved gold → pass-1 evidence (from tasks tab) → pass-2 evidence
-    const savedGoldEv    = r[24]||'';
-    const savedGoldEvUrl = r[25]||'';
+    const savedGoldEv    = r[26]||'';
+    const savedGoldEvUrl = r[27]||'';
     const p1EvData       = _p1EvidenceMap ? (_p1EvidenceMap[r[0]]||{}) : {};
     const goldEvidence    = savedGoldEv || p1EvData.evidence || (p2Ev !== '—' ? p2Ev : '');
     const goldEvidenceUrl = savedGoldEvUrl || p1EvData.evidenceUrl || (p2EvUrl||'');
@@ -1478,10 +1484,18 @@ function renderDisagreementCards(pairs){
             <div style="font-size:12px;color:var(--text-muted);line-height:1.5;white-space:normal">${p2Ev}
               ${p2EvUrl ? `<a href="${(()=>{const m=p2EvUrl.match(/HYPERLINK\s*\(\s*"([^"]+)"/i);return m?m[1]:p2EvUrl.startsWith('http')?p2EvUrl:'';})()}" target="_blank" style="color:var(--accent);font-size:11px;font-family:var(--mono);margin-left:4px">↗ link</a>` : ''}
             </div></div>
-          ${r[19] ? `<div class="dis-field"><div class="dis-field-lbl" style="color:var(--warn)">Images missing</div><div style="font-family:var(--mono);font-size:12px;color:var(--warn)">${r[19]}</div></div>` : ''}
+          ${r[21] ? `<div class="dis-field"><div class="dis-field-lbl" style="color:var(--warn)">Images missing</div><div style="font-family:var(--mono);font-size:12px;color:var(--warn)">${r[21]}</div></div>` : ''}
         </div>
       </div>
       <div class="gold-form">
+        <!-- Quick fill buttons -->
+        <div class="gold-form-row" style="margin-bottom:4px">
+          <label style="color:var(--text-dim)">Quick fill:</label>
+          <div style="display:flex;gap:8px">
+            <button class="btn-secondary" onclick="usePassLabel(${i},'p1')" style="font-size:11px;padding:4px 12px;border-color:var(--border-bright)">← Use Pass 1</button>
+            <button class="btn-secondary" onclick="usePassLabel(${i},'p2')" style="font-size:11px;padding:4px 12px;border-color:var(--border-bright)">Use Pass 2 →</button>
+          </div>
+        </div>
         <div class="gold-form-row">
           <label>Gold label:</label>
           <select id="gold-lbl-${i}" onchange="goldLabelChanged(${i})">${goldOpts}</select>
@@ -1546,6 +1560,51 @@ function renderDisagreementCards(pairs){
       if(ss) ss.textContent='staged';
     }
   });
+}
+
+function usePassLabel(idx, pass){
+  // Get the pair data for this card
+  const pair = _allDisPairs.find((p,i)=>i===idx);
+  if(!pair) return;
+  const r = pair.r;
+
+  let label, sub, lfp, evidence, evUrl;
+  if(pass === 'p1'){
+    label    = r[1]||'';
+    sub      = r[2]||'';
+    lfp      = r[3]||'';
+    const ev = _p1EvidenceMap[pair.batteryId]||{};
+    evidence = ev.evidence||'';
+    evUrl    = ev.evidenceUrl||'';
+    if(evUrl){
+      const m = String(evUrl).match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+      evUrl = m ? m[1] : (evUrl.startsWith('http') ? evUrl : '');
+    }
+  } else {
+    label    = r[10]||'';
+    sub      = r[11]||'';
+    lfp      = r[12]||'';
+    evidence = r[13]||'';
+    evUrl    = r[14]||'';
+    if(evUrl){
+      const m = String(evUrl).match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
+      evUrl = m ? m[1] : (evUrl.startsWith('http') ? evUrl : '');
+    }
+  }
+
+  // Fill gold form
+  const lblSel = document.getElementById('gold-lbl-'+idx);
+  if(lblSel){ lblSel.value = label; goldLabelChanged(idx); }
+  setTimeout(()=>{
+    const subSel = document.getElementById('gold-sub-'+idx);
+    const lfpSel = document.getElementById('gold-lfp-'+idx);
+    const evEl   = document.getElementById('gold-ev-'+idx);
+    const evUrlEl= document.getElementById('gold-ev-url-'+idx);
+    if(subSel) subSel.value = sub;
+    if(lfpSel){ lfpSel.value = lfp; goldSubChanged(idx); }
+    if(evEl)   evEl.value   = evidence;
+    if(evUrlEl) evUrlEl.value = evUrl;
+  }, 50); // small delay to let conditional fields render
 }
 
 function goldLabelChanged(idx){
@@ -1637,13 +1696,13 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       const r = (rangeRows[rn - minRow] || []);
       while(r.length<19) r.push('');
 
-      const p1RowNum = parseInt(r[6]);
+      const p1RowNum = parseInt(r[8]);
       const p1Label  = (r[1]||'').trim().toLowerCase();
       const p1Sub    = (r[2]||'').trim().toLowerCase();
       const p1Lfp    = (r[3]||'').trim().toLowerCase();
       const p2Label  = (r[10]||'').trim().toLowerCase();
-      const p2Sub    = (r[11]||'').trim().toLowerCase();
-      const p2Lfp    = (r[12]||'').trim().toLowerCase();
+      const p2Sub    = (r[13]||'').trim().toLowerCase();
+      const p2Lfp    = (r[14]||'').trim().toLowerCase();
 
       const gL = gold.trim().toLowerCase();
       const gS = goldSub.trim().toLowerCase();
@@ -1654,7 +1713,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
       // Queue consensus_tasks write
       consensusWrites.push(()=>sheetsUpdate(
-        `${SHEETS.CONSENSUS}!U${rn}:AB${rn}`,
+        `${SHEETS.CONSENSUS}!W${rn}:AD${rn}`,
         [[gold, goldSub, goldLfp, state.user.email, goldEv, goldEvUrl, pass1Correct, pass2Correct]]
       ));
 
