@@ -805,6 +805,21 @@ async function seedConsensusQueue(){
       await sheetsUpdate(`${SHEETS.ANN}!A1`,[ANN_HEADERS]);
     }
 
+    // Ensure consensus_tasks header matches current schema
+    setLoading(true,'Checking schema…');
+    const EXPECTED_HEADERS = ['battery_id','original_label','original_sublabel','original_lfp','original_annotator',
+      'original_evidence','original_evidence_url','stratum','pass1_row',
+      'assigned_to','status','assigned_at','label','sublabel','lfp',
+      'evidence','evidence_url','text_logo_visible','submitted_at','time_taken_seconds',
+      'consensus_status','missing_cameras','gold_label','gold_sublabel','gold_lfp',
+      'gold_set_by','gold_evidence','gold_evidence_url','pass1_correct','pass2_correct'];
+    const headerData = await sheetsGet(`${SHEETS.CONSENSUS}!1:1`);
+    const currentHeader = (headerData.values||[[]])[0]||[];
+    if(currentHeader.join(',') !== EXPECTED_HEADERS.join(',')){
+      await sheetsUpdate(`${SHEETS.CONSENSUS}!A1`, [EXPECTED_HEADERS]);
+      showToast('Schema updated — header row refreshed');
+    }
+
     // Read tasks sheet
     setLoading(true,'Reading completed tasks…');
     // Read tasks tab — need col I (assigned_to=r[8]) and col J (status=r[9])
@@ -1077,10 +1092,10 @@ async function loadAdminDashboard(){
     const seeded=cRows.length;
     const completed=cRows.filter(r=>r[10]==='complete').length;
     // Exclude same-annotator pairs from accuracy stats
-    const validRows=cRows.filter(r=>r[10]==='complete'&&!(r[4]&&r[7]&&r[4].toLowerCase()===r[7].toLowerCase()));
+    const validRows=cRows.filter(r=>r[10]==='complete'&&!(r[4]&&r[9]&&r[4].toLowerCase()===r[9].toLowerCase()));
     const agreed=validRows.filter(r=>r[20]==='agree').length;
     const disagreed=validRows.filter(r=>r[20]==='disagree').length;
-    const sameAnnotatorCount=cRows.filter(r=>r[10]==='complete'&&r[4]&&r[7]&&r[4].toLowerCase()===r[7].toLowerCase()).length;
+    const sameAnnotatorCount=cRows.filter(r=>r[10]==='complete'&&r[4]&&r[9]&&r[4].toLowerCase()===r[9].toLowerCase()).length;
     const pct=completed?Math.round(completed/seeded*100):0;
     const agreeRate=completed?Math.round(agreed/completed*100):0;
 
@@ -1120,7 +1135,7 @@ async function loadAdminDashboard(){
 function renderAccuracy(rows){
   const strata={};
   rows.forEach(r=>{
-    const s=r[5]||'Unknown';
+    const s=r[7]||'Unknown';
     if(!strata[s]) strata[s]={pool:STRATA_POOLS[s]||0,sampled:0,completed:0,agreed:0,disagreed:0};
     strata[s].sampled++;
     if(r[10]==='complete'){ strata[s].completed++; if(r[20]==='agree') strata[s].agreed++; else if(r[20]==='disagree') strata[s].disagreed++; }
@@ -1262,6 +1277,29 @@ let _p1EvidenceMap={};
 let _pendingGold={};  // rowNum → {gold, goldSub, goldLfp, goldEv, batteryId}
 
 function renderDisagreements(rows, p1EvidenceMap={}){
+  // Restore any staged labels from localStorage (survives refresh/crash)
+  if(Object.keys(_pendingGold).length === 0){
+    try {
+      const saved = localStorage.getItem('cf_pending_gold');
+      if(saved){
+        const parsed = JSON.parse(saved);
+        if(Object.keys(parsed).length > 0){
+          _pendingGold = parsed;
+          const count = Object.keys(_pendingGold).length;
+          const countEl = document.getElementById('pending-count');
+          const countBarEl = document.getElementById('pending-count-bar');
+          const saveBar = document.getElementById('save-all-bar');
+          const saveBtn = document.getElementById('btn-save-all-gold');
+          if(countEl){ countEl.textContent=count+' staged'; countEl.style.display=''; }
+          if(countBarEl) countBarEl.textContent = count+' gold label'+(count===1?'':'s')+' staged — not yet saved (auto-restored)';
+          if(saveBar) saveBar.style.display='flex';
+          if(saveBtn) saveBtn.textContent = `↑ Save ${count} to master dataset`;
+          showToast(`↺ Restored ${count} staged labels from previous session`);
+        }
+      }
+    } catch(e) {}
+  }
+
   // Store globally for filtering and post-render evidence population
   _p1EvidenceMap = p1EvidenceMap;
   // Build pairs with rowNum directly — avoids O(n²) indexOf scan
@@ -1380,6 +1418,8 @@ function restoreFromBackup(){
     // Re-render to show staged state on cards
     renderDisagreementCards(_allDisPairs);
 
+    // Also persist restored data to localStorage
+    try { localStorage.setItem('cf_pending_gold', JSON.stringify(_pendingGold)); } catch(e) {}
     document.getElementById('restore-panel').style.display='none';
     showToast(`✓ Restored ${count} staged gold labels — click Save to commit`);
   } catch(e){
@@ -1657,6 +1697,9 @@ function stageGoldLabel(rowNum, batteryId, idx){
   if(countBarEl) countBarEl.textContent = count+' gold label'+(count===1?'':'s')+' staged — not yet saved';
   if(saveBar){ saveBar.style.display='flex'; }
   if(saveBtn) saveBtn.textContent = `↑ Save ${count} to master dataset`;
+  // Persist to localStorage so work survives refresh/crash
+  try { localStorage.setItem('cf_pending_gold', JSON.stringify(_pendingGold)); } catch(e) {}
+
   showToast(`Staged — ${count} total pending`);
 
   // Non-blocking reminder at every 25 staged labels
@@ -1760,6 +1803,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
     // Clear pending
     _pendingGold = {};
+    try { localStorage.removeItem('cf_pending_gold'); } catch(e) {}
     const countEl    = document.getElementById('pending-count');
     const saveBar    = document.getElementById('save-all-bar');
     const saveBtn    = document.getElementById('btn-save-all-gold');
