@@ -580,7 +580,7 @@ function buildTemplateHTML() {
   return html;
 }
 
-const LABELS = ['Lithium','NiCd','NiMH','Lead','Alkaline','Zinc-Carbon','Mercury','Unknown','Data Error'];
+// LABELS now comes from CONFIG.LABELS (dynamic from config sheet)
 
 let state = {
   user: null, accessToken: null, isAdmin: false, isReviewer: false,
@@ -1492,7 +1492,7 @@ function renderDisagreementCards(pairs){
     const labelDiff=p1Label.toLowerCase()!==p2Label.toLowerCase();
     const subDiff=p1Sub.toLowerCase()!==p2Sub.toLowerCase();
     const lfpDiff=p1Lfp.toLowerCase()!==p2Lfp.toLowerCase();
-    const goldOpts=LABELS.map(l=>`<option value="${l}" ${gold===l?'selected':''}>${l}</option>`).join('');
+    const goldOpts=CONFIG.LABELS.map(l=>`<option value="${l}" ${gold===l?'selected':''}>${l}</option>`).join('');
     return `<div class="dis-card">
       <div class="dis-header">
         <div>
