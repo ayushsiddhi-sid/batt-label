@@ -866,7 +866,6 @@ async function seedConsensusQueue(){
 
     const toWrite=[];
     let totalNew=0;
-    const savedRowNums=[];
     for(const [stratum,{N,n}] of Object.entries(plan)){
       const pool=byStratum[stratum]||[];
       shuffle(pool);
@@ -889,8 +888,7 @@ async function seedConsensusQueue(){
           '',                  // U=consensus_status
           '','',''             // V=gold_label, W=gold_set_by (placeholder)
         ]);
-        savedRowNums.push(rn);
-      totalNew++;
+        totalNew++;
       }
     }
 
@@ -1812,6 +1810,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
 
     let consensusWrites = [];
     let taskWrites = [];
+    const savedRowNums = [];
     let corrected = 0, evidenceOnly = 0, skipped = 0;
 
     for(const [rowNum, {gold, goldSub, goldLfp, goldEv, goldEvUrl='', batteryId}] of pending){
@@ -1834,6 +1833,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       const pass1Correct = p1Label===gL && p1Sub===gS && p1Lfp===gF ? 'Yes' : 'No';
       const pass2Correct = p2Label===gL && p2Sub===gS && p2Lfp===gF ? 'Yes' : 'No';
 
+      savedRowNums.push(rn);
       // Queue consensus_tasks write
       consensusWrites.push(()=>sheetsUpdate(
         `${SHEETS.CONSENSUS}!W${rn}:AD${rn}`,
@@ -1883,8 +1883,6 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     // Clear pending
     // Clear claimed_by for saved rows
     if(state.isReviewer && !state.isAdmin){
-      for(const [rowNum] of Object.entries({})){} // placeholder
-      // We know the row numbers from the pending gold entries
       // Clear claimed_by (col AE) for each saved row
       for(const rn of savedRowNums){
         sheetsUpdate(`${SHEETS.CONSENSUS}!AE${rn}`, [['']])
