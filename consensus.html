@@ -1299,31 +1299,15 @@ let _p1EvidenceMap={};
 let _pendingGold={};  // rowNum → {gold, goldSub, goldLfp, goldEv, batteryId}
 
 function renderDisagreements(rows, p1EvidenceMap={}){
-  // For reviewers: filter to only show their claimed cards
-  // For admins: show all
-  if(state.isReviewer && !state.isAdmin){
-    const myEmail = state.user.email.toLowerCase();
-    const myClaimed = rows.filter(r=>r[30] && r[30].toLowerCase()===myEmail);
-    const unclaimed = rows.filter(r=>r[20]==='disagree' && (!r[30]||r[30]==='') && (!r[22]||r[22]===''));
+  // Store globally for evidence population
+  _p1EvidenceMap = p1EvidenceMap;
 
-    // Show claim panel if no claimed tasks
-    const claimPanel = document.getElementById('claim-panel');
-    const unclaimedCountEl = document.getElementById('unclaimed-count');
-    if(claimPanel){
-      if(myClaimed.length === 0){
-        claimPanel.style.display = '';
-        if(unclaimedCountEl) unclaimedCountEl.textContent = `${unclaimed.length} task${unclaimed.length===1?'':'s'} available to claim`;
-      } else {
-        claimPanel.style.display = 'none';
-      }
-    }
-    // Only render claimed rows for reviewer
-    rows = myClaimed;
-  } else {
-    // Admin — hide claim panel
-    const claimPanel = document.getElementById('claim-panel');
-    if(claimPanel) claimPanel.style.display = 'none';
-  }
+  // Build _allDisPairs from FULL rows FIRST — rowNum must be sheet position (i+2)
+  // This must happen before any filtering so rowNums are correct
+  _allDisPairs=[];
+  rows.forEach((r,i)=>{
+    if(r[20]==='disagree') _allDisPairs.push({r, gold:r[22]||'', stratum:r[7]||'', batteryId:r[0], rowNum:i+2});
+  });
 
   // Restore any staged labels from localStorage (survives refresh/crash)
   if(Object.keys(_pendingGold).length === 0){
@@ -1348,22 +1332,40 @@ function renderDisagreements(rows, p1EvidenceMap={}){
     } catch(e) {}
   }
 
-  // Store globally for filtering and post-render evidence population
-  _p1EvidenceMap = p1EvidenceMap;
-  // Build pairs with rowNum directly — avoids O(n²) indexOf scan
-  _allDisPairs=[];
-  rows.forEach((r,i)=>{
-    if(r[20]==='disagree') _allDisPairs.push({r, gold:r[22]||'', stratum:r[7]||'', batteryId:r[0], rowNum:i+2});
-  });
+  // For reviewers: filter _allDisPairs to only their claimed cards
+  // For admins: show all disagreements
+  if(state.isReviewer && !state.isAdmin){
+    const myEmail = state.user.email.toLowerCase();
+    const myClaimedPairs = _allDisPairs.filter(p=>p.r[30] && p.r[30].toLowerCase()===myEmail);
+    const unclaimed = _allDisPairs.filter(p=>(!p.r[30]||p.r[30]==='') && (!p.r[22]||p.r[22]===''));
 
-  // Populate stratum filter
+    // Show claim panel if no claimed tasks
+    const claimPanel = document.getElementById('claim-panel');
+    const unclaimedCountEl = document.getElementById('unclaimed-count');
+    if(claimPanel){
+      if(myClaimedPairs.length === 0){
+        claimPanel.style.display = '';
+        if(unclaimedCountEl) unclaimedCountEl.textContent = `${unclaimed.length} task${unclaimed.length===1?'':'s'} available to claim`;
+      } else {
+        claimPanel.style.display = 'none';
+      }
+    }
+    // Render only claimed pairs for reviewer — rowNums are correct since built from full rows
+    renderDisagreementCards(myClaimedPairs);
+  } else {
+    // Admin — hide claim panel, show all
+    const claimPanel = document.getElementById('claim-panel');
+    if(claimPanel) claimPanel.style.display = 'none';
+    renderDisagreementCards(_allDisPairs);
+  }
+
+  // Populate stratum filter from full list
   const sel=document.getElementById('dis-filter');
   if(sel){
     const strata=[...new Set(_allDisPairs.map(p=>p.stratum).filter(Boolean))].sort();
     sel.innerHTML='<option value="">All strata</option>'+strata.map(s=>`<option value="${s}">${s}</option>`).join('');
   }
 
-  renderDisagreementCards(_allDisPairs);
 }
 
 async function addSpecificTasks(){
@@ -1882,27 +1884,37 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       await new Promise(r=>setTimeout(r,500));
     }
 
-    // Clear pending
-    // Clear claimed_by for saved rows
+    // Clear claimed_by for saved rows — BLOCKING so dashboard reload sees updated state
     if(state.isReviewer && !state.isAdmin){
-      // Clear claimed_by (col AE) for each saved row
+      setLoading(true, 'Releasing claimed tasks…');
       for(const rn of savedRowNums){
-        sheetsUpdate(`${SHEETS.CONSENSUS}!AE${rn}`, [['']])
-          .catch(()=>{}); // non-blocking
+        await sheetsUpdate(`${SHEETS.CONSENSUS}!AE${rn}`, [['']])
+          .catch(()=>{});
+        await new Promise(r=>setTimeout(r,200));
       }
     }
+
+    // Clear local state
     _pendingGold = {};
     try { localStorage.removeItem('cf_pending_gold'); } catch(e) {}
-    const countEl    = document.getElementById('pending-count');
-    const saveBar    = document.getElementById('save-all-bar');
-    const saveBtn    = document.getElementById('btn-save-all-gold');
-    if(countEl)  countEl.style.display='none';
-    if(saveBar)  saveBar.style.display='none';
+    const countEl = document.getElementById('pending-count');
+    const saveBar = document.getElementById('save-all-bar');
+    if(countEl) countEl.style.display='none';
+    if(saveBar) saveBar.style.display='none';
+
     const skipMsg = skipped > 0 ? `, ${skipped} saved to consensus only (no source row)` : '';
     showToast(`✓ Saved — ${corrected} labels corrected, ${evidenceOnly} evidence updated${skipMsg}`);
-    // Claim next batch or reload dashboard — but not both
-    if(claimNext > 0) await claimBatch(claimNext);
-    else await loadAdminDashboard();
+
+    // Claim next batch or reload dashboard
+    if(claimNext > 0){
+      await claimBatch(claimNext);
+    } else {
+      await loadAdminDashboard();
+      // For reviewers: Save & Stop — switch to disagree tab showing claim panel
+      if(state.isReviewer && !state.isAdmin){
+        switchTab('disagree');
+      }
+    }
   } catch(e){
     showToast('Save failed: '+e.message,'error');
   }
