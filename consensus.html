@@ -330,7 +330,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     <div class="section-title">Per-annotator accuracy — agreed tasks count as correct; disagreements resolved by gold standard</div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Annotator</th><th>Sampled</th><th>Completed</th><th>Agreed</th><th>Disagreed</th><th>Gold resolved</th><th>Correct</th><th>Wrong</th><th>Pending gold</th><th>True accuracy</th><th>Total time</th><th>Avg/task</th><th>Last active</th><th>Status</th></tr></thead>
+        <thead><tr><th>Annotator</th><th>As P1</th><th>As P2</th><th>P1 correct</th><th>P1 wrong</th><th>P2 correct</th><th>P2 wrong</th><th>Pending gold</th><th>True accuracy</th><th>Total time</th><th>Avg/task</th><th>Last active</th><th>Status</th></tr></thead>
         <tbody id="tbody-cw"></tbody>
       </table>
     </div>
@@ -1190,27 +1190,49 @@ function renderCW(aRows, cRows){
   // Disagreed tasks → accuracy determined by gold standard (pass1_correct / pass2_correct cols Z-AA)
   // Disagreed without gold → pending (excluded from accuracy calculation)
 
-  // Build stats purely from pass-2 perspective — each annotator assessed on tasks they did as pass-2
-  // Pass-1 data is used only to determine agreement (comparison point), not attributed to p1 annotator
+  // Dual-role model: each annotator tracked as both pass-1 AND pass-2
+  // Agree → both correct; Disagree+gold → gold determines who was right; Disagree no gold → pending
   const annStats={};
 
+  function initAnn(email){
+    if(!annStats[email]) annStats[email]={
+      p1Tasks:0, p1Correct:0, p1Wrong:0, p1Pending:0,  // their pass-1 tasks in the queue
+      p2Tasks:0, p2Correct:0, p2Wrong:0, p2Pending:0,  // their pass-2 tasks
+    };
+  }
+
   cRows.forEach(r=>{
-    const p2ann = r[9];  // assigned_to = pass-2 annotator
-    const p1ann = r[4];  // original_annotator
-    if(!p2ann || r[10]!=='complete') return;
-    // Skip same-annotator pairs
-    if(p1ann && p2ann && p1ann.toLowerCase()===p2ann.toLowerCase()) return;
-    if(!annStats[p2ann]) annStats[p2ann]={completed:0,agreed:0,disagreed:0,correct:0,wrong:0,pending:0};
-    annStats[p2ann].completed++;
-    if(r[20]==='agree'){
-      annStats[p2ann].agreed++;
-      annStats[p2ann].correct++; // agreement = pass-2 was correct
+    const p1ann = r[4];
+    const p2ann = r[9];
+    if(!p1ann || !p2ann || r[10]!=='complete') return;
+    // Skip same-annotator pairs — can't assess
+    if(p1ann.toLowerCase()===p2ann.toLowerCase()) return;
+
+    initAnn(p1ann);
+    initAnn(p2ann);
+
+    const agreed = r[20]==='agree';
+    const p1Gold = r[28]; // 'Yes'/'No'/'' for pass1_correct
+    const p2Gold = r[29]; // 'Yes'/'No'/'' for pass2_correct
+
+    // ── Pass-1 attribution ──
+    annStats[p1ann].p1Tasks++;
+    if(agreed){
+      annStats[p1ann].p1Correct++;
     } else {
-      annStats[p2ann].disagreed++;
-      // Use pass2_correct (col AD, index 29) to determine accuracy
-      if(r[29]==='Yes')       annStats[p2ann].correct++;
-      else if(r[29]==='No')   annStats[p2ann].wrong++;
-      else                    annStats[p2ann].pending++; // gold not yet set
+      if(p1Gold==='Yes')       annStats[p1ann].p1Correct++;
+      else if(p1Gold==='No')   annStats[p1ann].p1Wrong++;
+      else                     annStats[p1ann].p1Pending++;
+    }
+
+    // ── Pass-2 attribution ──
+    annStats[p2ann].p2Tasks++;
+    if(agreed){
+      annStats[p2ann].p2Correct++;
+    } else {
+      if(p2Gold==='Yes')       annStats[p2ann].p2Correct++;
+      else if(p2Gold==='No')   annStats[p2ann].p2Wrong++;
+      else                     annStats[p2ann].p2Pending++;
     }
   });
 
@@ -1218,12 +1240,16 @@ function renderCW(aRows, cRows){
   aRows.forEach(r=>{ if(r[0]) timeMap[r[0]]={totalTime:parseInt(r[5])||0,avgTime:parseInt(r[6])||0,lastActive:r[7]||''}; });
 
   const tbody=document.getElementById('tbody-cw');
-  const sorted=Object.entries(annStats).sort((a,b)=>(b[1].wrong||0)-(a[1].wrong||0));
+  const sorted=Object.entries(annStats).sort((a,b)=>{
+    const aWrong=(a[1].p1Wrong+a[1].p2Wrong);
+    const bWrong=(b[1].p1Wrong+b[1].p2Wrong);
+    return bWrong - aWrong;
+  });
 
   tbody.innerHTML=sorted.map(([ann,d])=>{
-    const correct  = d.correct||0;
-    const wrong    = d.wrong||0;
-    const pending  = d.pending||0;
+    const correct  = d.p1Correct + d.p2Correct;
+    const wrong    = d.p1Wrong   + d.p2Wrong;
+    const pending  = d.p1Pending + d.p2Pending;
     const resolved = correct + wrong;
     const accuracy = resolved > 0 ? correct / resolved : null;
 
@@ -1251,13 +1277,12 @@ function renderCW(aRows, cRows){
 
     return `<tr class="${rowClass}">
       <td style="font-family:var(--mono);font-size:12px">${shortAnn}</td>
-      <td>${d.completed||'—'}</td>
-      <td>${d.completed||'—'}</td>
-      <td style="color:var(--accent)">${d.agreed||0}</td>
-      <td style="color:${(d.disagreed||0)>=2?'var(--warn)':'var(--text)'}">${d.disagreed||0}</td>
-      <td style="color:var(--text-muted)">${resolved||'—'}</td>
-      <td style="color:var(--accent)">${correct||'—'}</td>
-      <td style="color:${wrong>0?'var(--red)':'var(--text-dim)'}">${wrong||'—'}</td>
+      <td style="color:var(--text-muted)">${d.p1Tasks||'—'}</td>
+      <td style="color:var(--text-muted)">${d.p2Tasks||'—'}</td>
+      <td style="color:var(--accent)">${d.p1Correct||0}</td>
+      <td style="color:${d.p1Wrong>0?'var(--red)':'var(--text-dim)'}">${d.p1Wrong||'—'}</td>
+      <td style="color:var(--accent)">${d.p2Correct||0}</td>
+      <td style="color:${d.p2Wrong>0?'var(--red)':'var(--text-dim)'}">${d.p2Wrong||'—'}</td>
       <td>${pendingFmt}</td>
       <td>${accuracyFmt}</td>
       <td style="font-family:var(--mono);font-size:12px;color:var(--text-muted)">${t.totalTime?fmtTime(t.totalTime):'—'}</td>
@@ -1826,7 +1851,6 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
         }
       } else {
         // No pass1_row — consensus record still saved, tasks tab can't be updated
-        console.warn('No pass1_row for battery:', batteryId, '— gold saved to consensus only');
         skipped++;
       }
     }
