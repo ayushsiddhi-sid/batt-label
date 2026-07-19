@@ -1190,46 +1190,27 @@ function renderCW(aRows, cRows){
   // Disagreed tasks → accuracy determined by gold standard (pass1_correct / pass2_correct cols Z-AA)
   // Disagreed without gold → pending (excluded from accuracy calculation)
 
+  // Build stats purely from pass-2 perspective — each annotator assessed on tasks they did as pass-2
+  // Pass-1 data is used only to determine agreement (comparison point), not attributed to p1 annotator
   const annStats={};
 
-  // Process pass-1 annotators (original_annotator = col E, index 4)
-  // Exclude same-annotator pairs from accuracy stats
   cRows.forEach(r=>{
-    const p1ann = r[4];
-    const p2ann = r[9];
-    if(!p1ann || r[10]!=='complete') return;
-    // Skip same-annotator — can't be used for accuracy
-    if(p1ann && p2ann && p1ann.toLowerCase()===p2ann.toLowerCase()) return;
-    if(!annStats[p1ann]) annStats[p1ann]={sampled:0,completed:0,agreed:0,disagreed:0,p1Correct:0,p1Wrong:0,p1Pending:0};
-    annStats[p1ann].sampled++;
-    annStats[p1ann].completed++;
-    if(r[20]==='agree'){
-      annStats[p1ann].agreed++;
-      annStats[p1ann].p1Correct++; // agreed = correct for both passes
-    } else {
-      annStats[p1ann].disagreed++;
-      // Check if gold has been set (col Z = pass1_correct, index 25)
-      if(r[28]==='Yes')       annStats[p1ann].p1Correct++;
-      else if(r[28]==='No')   annStats[p1ann].p1Wrong++;
-      else                    annStats[p1ann].p1Pending++;
-    }
-  });
-
-  // Process pass-2 annotators (assigned_to = col H, index 7)
-  // Exclude same-annotator pairs from accuracy stats
-  cRows.forEach(r=>{
-    const p2ann = r[9];
+    const p2ann = r[9];  // assigned_to = pass-2 annotator
+    const p1ann = r[4];  // original_annotator
     if(!p2ann || r[10]!=='complete') return;
-    // Skip same-annotator
-    if(r[4] && p2ann && r[4].toLowerCase()===p2ann.toLowerCase()) return;
-    if(!annStats[p2ann]) annStats[p2ann]={sampled:0,completed:0,agreed:0,disagreed:0,p2Correct:0,p2Wrong:0,p2Pending:0};
-    // Don't double-count sampled/completed for pass-2
+    // Skip same-annotator pairs
+    if(p1ann && p2ann && p1ann.toLowerCase()===p2ann.toLowerCase()) return;
+    if(!annStats[p2ann]) annStats[p2ann]={completed:0,agreed:0,disagreed:0,correct:0,wrong:0,pending:0};
+    annStats[p2ann].completed++;
     if(r[20]==='agree'){
-      annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
+      annStats[p2ann].agreed++;
+      annStats[p2ann].correct++; // agreement = pass-2 was correct
     } else {
-      if(r[29]==='Yes')       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
-      else if(r[29]==='No')   annStats[p2ann].p2Wrong   = (annStats[p2ann].p2Wrong||0)   + 1;
-      else                    annStats[p2ann].p2Pending  = (annStats[p2ann].p2Pending||0)  + 1;
+      annStats[p2ann].disagreed++;
+      // Use pass2_correct (col AD, index 29) to determine accuracy
+      if(r[29]==='Yes')       annStats[p2ann].correct++;
+      else if(r[29]==='No')   annStats[p2ann].wrong++;
+      else                    annStats[p2ann].pending++; // gold not yet set
     }
   });
 
@@ -1237,13 +1218,12 @@ function renderCW(aRows, cRows){
   aRows.forEach(r=>{ if(r[0]) timeMap[r[0]]={totalTime:parseInt(r[5])||0,avgTime:parseInt(r[6])||0,lastActive:r[7]||''}; });
 
   const tbody=document.getElementById('tbody-cw');
-  const sorted=Object.entries(annStats).sort((a,b)=>(b[1].p1Wrong||0)+(b[1].p2Wrong||0)-(a[1].p1Wrong||0)-(a[1].p2Wrong||0));
+  const sorted=Object.entries(annStats).sort((a,b)=>(b[1].wrong||0)-(a[1].wrong||0));
 
   tbody.innerHTML=sorted.map(([ann,d])=>{
-    // True accuracy: correct / (correct + wrong) — excludes pending
-    const correct  = (d.p1Correct||0) + (d.p2Correct||0);
-    const wrong    = (d.p1Wrong||0)   + (d.p2Wrong||0);
-    const pending  = (d.p1Pending||0) + (d.p2Pending||0);
+    const correct  = d.correct||0;
+    const wrong    = d.wrong||0;
+    const pending  = d.pending||0;
     const resolved = correct + wrong;
     const accuracy = resolved > 0 ? correct / resolved : null;
 
@@ -1271,7 +1251,7 @@ function renderCW(aRows, cRows){
 
     return `<tr class="${rowClass}">
       <td style="font-family:var(--mono);font-size:12px">${shortAnn}</td>
-      <td>${d.sampled||'—'}</td>
+      <td>${d.completed||'—'}</td>
       <td>${d.completed||'—'}</td>
       <td style="color:var(--accent)">${d.agreed||0}</td>
       <td style="color:${(d.disagreed||0)>=2?'var(--warn)':'var(--text)'}">${d.disagreed||0}</td>
