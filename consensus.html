@@ -1581,8 +1581,8 @@ function renderDisagreementCards(pairs){
         <div class="gold-form-row" style="margin-bottom:4px">
           <label style="color:var(--text-dim)">Quick fill:</label>
           <div style="display:flex;gap:8px">
-            <button class="btn-secondary" onclick="usePassLabel(${i},'p1')" style="font-size:11px;padding:4px 12px;border-color:var(--border-bright)">← Use Pass 1</button>
-            <button class="btn-secondary" onclick="usePassLabel(${i},'p2')" style="font-size:11px;padding:4px 12px;border-color:var(--border-bright)">Use Pass 2 →</button>
+            <button class="btn-secondary" onclick="usePassLabel(${rowNum},${i},'p1')" style="font-size:11px;padding:4px 12px;border-color:var(--border-bright)">← Use Pass 1</button>
+            <button class="btn-secondary" onclick="usePassLabel(${rowNum},${i},'p2')" style="font-size:11px;padding:4px 12px;border-color:var(--border-bright)">Use Pass 2 →</button>
           </div>
         </div>
         <div class="gold-form-row">
@@ -1600,7 +1600,18 @@ function renderDisagreementCards(pairs){
           <input type="text" id="gold-ev-url-${i}" style="flex:1;font-size:12px;padding:5px 8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:3px" placeholder="https://… (optional)" value="${goldEvidenceUrl}" />
         </div>
         <div class="gold-form-row">
-          <button class="btn-secondary" onclick="stageGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px" id="stage-btn-${i}">✓ Stage gold</button>
+          <div style="margin-top:8px">
+            <label class="checkbox-label" style="font-size:11px">
+              <input type="checkbox" id="gold-missing-${i}" onchange="toggleGoldCameras(${i})"> Image(s) Missing Battery
+            </label>
+            <div id="gold-cameras-${i}" style="display:none;margin-top:6px;background:var(--warn-dim);border:1px solid rgba(245,166,35,.25);border-radius:4px;padding:8px">
+              <div style="font-family:var(--mono);font-size:10px;color:var(--warn);margin-bottom:6px">Select cameras</div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px">
+                ${['CT1','CR1','CL1','CFR1','CBK1','CB1'].map(c=>`<label class="checkbox-label" style="justify-content:center;font-family:var(--mono);font-size:11px;font-weight:600;padding:4px 6px"><input type="checkbox" class="gold-cam-${i}" value="${c}"> ${c}</label>`).join('')}
+              </div>
+            </div>
+          </div>
+          <button class="btn-secondary" onclick="stageGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px;margin-top:8px" id="stage-btn-${i}">✓ Stage gold</button>
           <span id="stage-status-${i}" style="font-family:var(--mono);font-size:10px;color:var(--accent)"></span>
           ${goldBy?`<span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-left:4px">previously saved by ${goldBy}</span>`:''}
         </div>
@@ -1651,20 +1662,20 @@ function renderDisagreementCards(pairs){
   });
 }
 
-function usePassLabel(idx, pass){
-  // Get the pair data for this card
-  const pair = _allDisPairs.find((p,i)=>i===idx);
+function usePassLabel(rowNum, cardIdx, pass){
+  // Find pair by rowNum — works correctly even when cards are filtered for reviewers
+  const pair = _allDisPairs.find(p=>p.rowNum===rowNum);
   if(!pair) return;
   const r = pair.r;
 
   let label, sub, lfp, evidence, evUrl;
   if(pass === 'p1'){
-    label    = r[1]||'';
-    sub      = r[2]||'';
-    lfp      = r[3]||'';
-    const ev = _p1EvidenceMap[pair.batteryId]||{};
-    evidence = ev.evidence||'';
-    evUrl    = ev.evidenceUrl||'';
+    // Read directly from consensus_tasks row — guaranteed to match what was seeded
+    label    = r[1]||'';   // original_label (B)
+    sub      = r[2]||'';   // original_sublabel (C)
+    lfp      = r[3]||'';   // original_lfp (D)
+    evidence = r[5]||'';   // original_evidence (F)
+    evUrl    = r[6]||'';   // original_evidence_url (G)
     if(evUrl){
       const m = String(evUrl).match(/HYPERLINK\s*\(\s*"([^"]+)"/i);
       evUrl = m ? m[1] : (evUrl.startsWith('http') ? evUrl : '');
@@ -1681,19 +1692,19 @@ function usePassLabel(idx, pass){
     }
   }
 
-  // Fill gold form
-  const lblSel = document.getElementById('gold-lbl-'+idx);
-  if(lblSel){ lblSel.value = label; goldLabelChanged(idx); }
+  // Fill gold form using cardIdx for DOM element IDs
+  const lblSel = document.getElementById('gold-lbl-'+cardIdx);
+  if(lblSel){ lblSel.value = label; goldLabelChanged(cardIdx); }
   setTimeout(()=>{
-    const subSel = document.getElementById('gold-sub-'+idx);
-    const lfpSel = document.getElementById('gold-lfp-'+idx);
-    const evEl   = document.getElementById('gold-ev-'+idx);
-    const evUrlEl= document.getElementById('gold-ev-url-'+idx);
-    if(subSel) subSel.value = sub;
-    if(lfpSel){ lfpSel.value = lfp; goldSubChanged(idx); }
-    if(evEl)   evEl.value   = evidence;
+    const subSel  = document.getElementById('gold-sub-'+cardIdx);
+    const lfpSel  = document.getElementById('gold-lfp-'+cardIdx);
+    const evEl    = document.getElementById('gold-ev-'+cardIdx);
+    const evUrlEl = document.getElementById('gold-ev-url-'+cardIdx);
+    if(subSel)  subSel.value  = sub;
+    if(lfpSel){ lfpSel.value  = lfp; goldSubChanged(cardIdx); }
+    if(evEl)    evEl.value    = evidence;
     if(evUrlEl) evUrlEl.value = evUrl;
-  }, 50); // small delay to let conditional fields render
+  }, 50);
 }
 
 // ── CLAIM SYSTEM ─────────────────────────────────────────────────
@@ -1729,6 +1740,15 @@ async function saveAndClaim(claimNext){
   await saveAllGoldLabels(claimNext);
 }
 
+function toggleGoldCameras(idx){
+  const cb = document.getElementById('gold-missing-'+idx);
+  const wrap = document.getElementById('gold-cameras-'+idx);
+  if(wrap) wrap.style.display = cb && cb.checked ? '' : 'none';
+  if(wrap && cb && !cb.checked){
+    wrap.querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=false);
+  }
+}
+
 function goldLabelChanged(idx){
   const lbl    = document.getElementById(`gold-lbl-${idx}`).value;
   const subSel = document.getElementById(`gold-sub-${idx}`);
@@ -1751,6 +1771,11 @@ function goldSubChanged(idx){
 
 // ── Stage gold label locally (no API call) ──
 function stageGoldLabel(rowNum, batteryId, idx){
+  // Collect missing cameras if checked
+  const goldMissingCb   = document.getElementById('gold-missing-'+idx);
+  const goldMissingCams = goldMissingCb && goldMissingCb.checked
+    ? [...document.querySelectorAll('.gold-cam-'+idx+':checked')].map(c=>c.value).join(', ')
+    : '';
   const gold    = document.getElementById(`gold-lbl-${idx}`).value;
   const goldSub = document.getElementById(`gold-sub-${idx}`).value || '';
   const goldLfp = document.getElementById(`gold-lfp-${idx}`).value || '';
@@ -1761,7 +1786,7 @@ function stageGoldLabel(rowNum, batteryId, idx){
   if(!goldEv){ showToast('Evidence is required','error'); return; }
 
   // Store locally
-  _pendingGold[rowNum] = {gold, goldSub, goldLfp, goldEv, goldEvUrl, batteryId, idx};
+  _pendingGold[rowNum] = {gold, goldSub, goldLfp, goldEv, goldEvUrl, goldMissingCams, batteryId, idx};
 
   // Update UI
   const btn = document.getElementById(`stage-btn-${idx}`);
@@ -1817,7 +1842,7 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     const savedRowNums = [];
     let corrected = 0, evidenceOnly = 0, skipped = 0;
 
-    for(const [rowNum, {gold, goldSub, goldLfp, goldEv, goldEvUrl='', batteryId}] of pending){
+    for(const [rowNum, {gold, goldSub, goldLfp, goldEv, goldEvUrl='', goldMissingCams='', batteryId}] of pending){
       const rn = parseInt(rowNum);
       const r = (rangeRows[rn - minRow] || []);
       while(r.length<19) r.push('');
@@ -1841,7 +1866,9 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       // Queue consensus_tasks write
       consensusWrites.push(()=>sheetsUpdate(
         `${SHEETS.CONSENSUS}!W${rn}:AD${rn}`,
-        [[gold, goldSub, goldLfp, state.user.email, goldEv, goldEvUrl, pass1Correct, pass2Correct]]
+        [[gold, goldSub, goldLfp, state.user.email,
+        goldMissingCams ? `${goldEv} [Missing cameras: ${goldMissingCams}]` : goldEv,
+        goldEvUrl, pass1Correct, pass2Correct]]
       ));
 
       // Queue tasks tab write
