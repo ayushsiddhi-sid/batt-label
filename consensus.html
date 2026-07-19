@@ -354,10 +354,24 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
         </select>
       </div>
     </div>
-    <!-- Save all button — always visible when there are staged changes -->
-    <div id="save-all-bar" style="display:none;background:var(--warn-dim);border:1px solid rgba(245,166,35,.3);border-radius:6px;padding:10px 16px;margin-bottom:16px;display:none;align-items:center;justify-content:space-between">
+    <!-- Claim panel — shown when reviewer has no claimed tasks -->
+    <div id="claim-panel" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:24px;margin-bottom:16px;text-align:center">
+      <div style="font-family:var(--mono);font-size:13px;color:var(--text);margin-bottom:6px">Claim tasks to review</div>
+      <div id="unclaimed-count" style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:16px"></div>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <button class="btn-primary" id="btn-claim-5">Claim 5 tasks</button>
+        <button class="btn-primary" id="btn-claim-10">Claim 10 tasks</button>
+      </div>
+    </div>
+
+    <!-- Save bar — shown when gold labels are staged -->
+    <div id="save-all-bar" style="display:none;background:var(--warn-dim);border:1px solid rgba(245,166,35,.3);border-radius:6px;padding:10px 16px;margin-bottom:16px;align-items:center;justify-content:space-between">
       <span style="font-family:var(--mono);font-size:12px;color:var(--warn)" id="pending-count-bar">0 gold labels staged</span>
-      <button class="btn-primary" id="btn-save-all-gold" onclick="saveAllGoldLabels()" style="background:var(--warn);color:#0f0f0f;white-space:nowrap">↑ Save all to master dataset</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn-secondary" id="btn-save-stop" style="font-size:12px;white-space:nowrap">↑ Save &amp; Stop</button>
+        <button class="btn-secondary" id="btn-save-claim-5" style="font-size:12px;white-space:nowrap">↑ Save &amp; Claim 5</button>
+        <button class="btn-primary" id="btn-save-all-gold" onclick="saveAllGoldLabels(0)" style="background:var(--warn);color:#0f0f0f;font-size:12px;white-space:nowrap">↑ Save &amp; Claim 10</button>
+      </div>
     </div>
     <!-- Restore from backup bar -->
     <div style="margin-bottom:16px;display:flex;align-items:center;gap:8px">
@@ -543,14 +557,8 @@ async function labelingUpdate(range, values){
 // text_logo_visible(15) submitted_at(16) time_taken_seconds(17)
 // consensus_status(18) gold_label(19) gold_sublabel(20) gold_lfp(21) gold_set_by(22) gold_evidence(23) gold_evidence_url(24) pass1_correct(25) pass2_correct(26)
 
-// Pool sizes per stratum — used in Accuracy by Stratum table to show total available
-// Update these when batch data changes significantly
-const STRATA_POOLS = {
-  'Lithium — Li-ion LFP unknown':3365,'Lithium — Li-ion non-LFP':2945,
-  'NiCd':1240,'Data Error':623,'Lithium — Li-ion LFP':132,
-  'NiMH':97,'Lithium — sublabel unknown':42,'Lithium — Li Primary':10,
-  'Lead':6,'Alkaline':1,'Zinc-Carbon':1,'Mercury':1
-};
+// Pool sizes computed dynamically in loadAdminDashboard from labeling sheet
+let _strataPools = {};
 
 const EVIDENCE_TEMPLATES = [
   { group: 'Direct evidence', label: 'Text visible',                    text: 'The presence of visible [chemistry] text in [cam].jpg provides sufficient evidence.' },
@@ -812,7 +820,7 @@ async function seedConsensusQueue(){
       'assigned_to','status','assigned_at','label','sublabel','lfp',
       'evidence','evidence_url','text_logo_visible','submitted_at','time_taken_seconds',
       'consensus_status','missing_cameras','gold_label','gold_sublabel','gold_lfp',
-      'gold_set_by','gold_evidence','gold_evidence_url','pass1_correct','pass2_correct'];
+      'gold_set_by','gold_evidence','gold_evidence_url','pass1_correct','pass2_correct','claimed_by'];
     const headerData = await sheetsGet(`${SHEETS.CONSENSUS}!1:1`);
     const currentHeader = (headerData.values||[[]])[0]||[];
     if(currentHeader.join(',') !== EXPECTED_HEADERS.join(',')){
@@ -859,6 +867,7 @@ async function seedConsensusQueue(){
 
     const toWrite=[];
     let totalNew=0;
+    const savedRowNums=[];
     for(const [stratum,{N,n}] of Object.entries(plan)){
       const pool=byStratum[stratum]||[];
       shuffle(pool);
@@ -881,7 +890,8 @@ async function seedConsensusQueue(){
           '',                  // U=consensus_status
           '','',''             // V=gold_label, W=gold_set_by (placeholder)
         ]);
-        totalNew++;
+        savedRowNums.push(rn);
+      totalNew++;
       }
     }
 
@@ -1069,22 +1079,30 @@ async function loadAdminDashboard(){
       switchTab('disagree');
     }
     const [cData,aData,tData]=await Promise.all([
-      sheetsGet(`${SHEETS.CONSENSUS}!A:AD`),
+      sheetsGet(`${SHEETS.CONSENSUS}!A:AE`),
       sheetsGet(`${SHEETS.ANN}!A:J`),
-      labelingGet(`${SHEETS.TASKS}!A:N`)
+      labelingGet(`${SHEETS.TASKS}!A:D`)  // A:D sufficient for stratum (label/sub/lfp)
     ]);
+
+    // Compute pool sizes dynamically from labeling sheet
+    _strataPools = {};
+    (tData.values||[]).slice(1).forEach(r=>{
+      if(!r[0]) return;
+      const s = getStratum(r);
+      if(s) _strataPools[s] = (_strataPools[s]||0) + 1;
+    });
     const cRows=(cData.values||[]).slice(1)
       .filter(r=>r[0])
-      .map(r=>{ while(r.length<30) r.push(''); return r; });
+      .map(r=>{ while(r.length<31) r.push(''); return r; });
     const aRows=(aData.values||[]).slice(1).filter(r=>r[0]);
     // Build pass-1 evidence lookup: battery_id → {evidence, evidenceUrl}
-    // Key by battery_id — prefer rows with actual evidence content
+    // p1EvidenceMap needs evidence cols — separate read since pool read only uses A:D
+    const tDataFull = await labelingGet(`${SHEETS.TASKS}!A:N`);
     const p1EvidenceMap={};
-    (tData.values||[]).slice(1).forEach(r=>{
+    (tDataFull.values||[]).slice(1).forEach(r=>{
       if(!r[0]) return;
       const existing = p1EvidenceMap[r[0]];
       const hasEvidence = (r[4]||'').trim().length > 0;
-      // Only overwrite if new row has evidence and existing doesn't
       if(!existing || (!existing.evidence && hasEvidence)){
         p1EvidenceMap[r[0]] = {evidence:r[4]||'', evidenceUrl:r[5]||'', missingCameras:r[13]||''};
       }
@@ -1137,7 +1155,7 @@ function renderAccuracy(rows){
   const strata={};
   rows.forEach(r=>{
     const s=r[7]||'Unknown';
-    if(!strata[s]) strata[s]={pool:STRATA_POOLS[s]||0,sampled:0,completed:0,agreed:0,disagreed:0};
+    if(!strata[s]) strata[s]={pool:_strataPools[s]||0,sampled:0,completed:0,agreed:0,disagreed:0};
     strata[s].sampled++;
     if(r[10]==='complete'){ strata[s].completed++; if(r[20]==='agree') strata[s].agreed++; else if(r[20]==='disagree') strata[s].disagreed++; }
   });
@@ -1192,7 +1210,7 @@ function renderCW(aRows, cRows){
     } else {
       annStats[p1ann].disagreed++;
       // Check if gold has been set (col Z = pass1_correct, index 25)
-      while(r.length<30) r.push('');
+      while(r.length<31) r.push('');
       if(r[28]==='Yes')       annStats[p1ann].p1Correct++;
       else if(r[28]==='No')   annStats[p1ann].p1Wrong++;
       else                    annStats[p1ann].p1Pending++;
@@ -1211,7 +1229,7 @@ function renderCW(aRows, cRows){
     if(r[20]==='agree'){
       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
     } else {
-      while(r.length<30) r.push('');
+      while(r.length<31) r.push('');
       if(r[29]==='Yes')       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
       else if(r[29]==='No')   annStats[p2ann].p2Wrong   = (annStats[p2ann].p2Wrong||0)   + 1;
       else                    annStats[p2ann].p2Pending  = (annStats[p2ann].p2Pending||0)  + 1;
@@ -1278,6 +1296,32 @@ let _p1EvidenceMap={};
 let _pendingGold={};  // rowNum → {gold, goldSub, goldLfp, goldEv, batteryId}
 
 function renderDisagreements(rows, p1EvidenceMap={}){
+  // For reviewers: filter to only show their claimed cards
+  // For admins: show all
+  if(state.isReviewer && !state.isAdmin){
+    const myEmail = state.user.email.toLowerCase();
+    const myClaimed = rows.filter(r=>r[30] && r[30].toLowerCase()===myEmail);
+    const unclaimed = rows.filter(r=>r[20]==='disagree' && (!r[30]||r[30]===''));
+
+    // Show claim panel if no claimed tasks
+    const claimPanel = document.getElementById('claim-panel');
+    const unclaimedCountEl = document.getElementById('unclaimed-count');
+    if(claimPanel){
+      if(myClaimed.length === 0){
+        claimPanel.style.display = '';
+        if(unclaimedCountEl) unclaimedCountEl.textContent = `${unclaimed.length} task${unclaimed.length===1?'':'s'} available to claim`;
+      } else {
+        claimPanel.style.display = 'none';
+      }
+    }
+    // Only render claimed rows for reviewer
+    rows = myClaimed;
+  } else {
+    // Admin — hide claim panel
+    const claimPanel = document.getElementById('claim-panel');
+    if(claimPanel) claimPanel.style.display = 'none';
+  }
+
   // Restore any staged labels from localStorage (survives refresh/crash)
   if(Object.keys(_pendingGold).length === 0){
     try {
@@ -1648,6 +1692,39 @@ function usePassLabel(idx, pass){
   }, 50); // small delay to let conditional fields render
 }
 
+// ── CLAIM SYSTEM ─────────────────────────────────────────────────
+async function claimBatch(n){
+  setLoading(true, `Claiming ${n} tasks…`);
+  try {
+    const cData = await sheetsGet(`${SHEETS.CONSENSUS}!A:AE`);
+    const rows = (cData.values||[]).slice(1);
+    // Find unclaimed disagreement rows
+    const unclaimed = rows
+      .map((r,i)=>({r, idx:i+2}))
+      .filter(({r})=> r[20]==='disagree' && (!r[30]||r[30]===''));
+    if(unclaimed.length === 0){
+      showToast('No unclaimed tasks remaining','success');
+      setLoading(false);
+      return;
+    }
+    const toBeClaimed = unclaimed.slice(0, n);
+    // Write email to claimed_by (col AE) for each
+    for(const {idx} of toBeClaimed){
+      await sheetsUpdate(`${SHEETS.CONSENSUS}!AE${idx}`, [[state.user.email]]);
+    }
+    showToast(`✓ Claimed ${toBeClaimed.length} tasks`);
+    // Reload dashboard to show claimed cards
+    await loadAdminDashboard();
+  } catch(e){
+    showToast('Claim failed: '+(e.message||'error'),'error');
+  }
+  setLoading(false);
+}
+
+async function saveAndClaim(claimNext){
+  await saveAllGoldLabels(claimNext);
+}
+
 function goldLabelChanged(idx){
   const lbl    = document.getElementById(`gold-lbl-${idx}`).value;
   const subSel = document.getElementById(`gold-sub-${idx}`);
@@ -1713,7 +1790,7 @@ function stageGoldLabel(rowNum, batteryId, idx){
 }
 
 // ── Batch save all staged gold labels ──
-async function saveAllGoldLabels(){
+async function saveAllGoldLabels(claimNext=0){
   const pending = Object.entries(_pendingGold);
   if(!pending.length){ showToast('Nothing staged','error'); return; }
   if(!confirm(`Save ${pending.length} gold label(s) to master dataset?
@@ -1803,6 +1880,16 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     }
 
     // Clear pending
+    // Clear claimed_by for saved rows
+    if(state.isReviewer && !state.isAdmin){
+      for(const [rowNum] of Object.entries({})){} // placeholder
+      // We know the row numbers from the pending gold entries
+      // Clear claimed_by (col AE) for each saved row
+      for(const rn of savedRowNums){
+        sheetsUpdate(`${SHEETS.CONSENSUS}!AE${rn}`, [['']])
+          .catch(()=>{}); // non-blocking
+      }
+    }
     _pendingGold = {};
     try { localStorage.removeItem('cf_pending_gold'); } catch(e) {}
     const countEl    = document.getElementById('pending-count');
@@ -1810,6 +1897,9 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     const saveBtn    = document.getElementById('btn-save-all-gold');
     if(countEl)  countEl.style.display='none';
     if(saveBar)  saveBar.style.display='none';
+    // Claim next batch if requested
+    if(claimNext > 0) await claimBatch(claimNext);
+    else await loadAdminDashboard();
 
     const skipMsg = skipped > 0 ? `, ${skipped} saved to consensus only (no source row)` : '';
     showToast(`✓ Saved — ${corrected} labels corrected, ${evidenceOnly} evidence updated${skipMsg}`);
@@ -2004,6 +2094,16 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('btn-goto-disagree').addEventListener('click',()=>{
     switchTab('disagree');
   });
+  // Claim buttons
+  document.getElementById('btn-claim-5').addEventListener('click',()=>claimBatch(5));
+  document.getElementById('btn-claim-10').addEventListener('click',()=>claimBatch(10));
+  // Save buttons
+  document.getElementById('btn-save-stop').addEventListener('click',()=>saveAllGoldLabels(0));
+  document.getElementById('btn-save-claim-5').addEventListener('click',()=>saveAllGoldLabels(5));
+  // btn-save-all-gold (Save & Claim 10) already wired via onclick="saveAllGoldLabels(0)"
+  // Update its onclick to claim 10
+  document.getElementById('btn-save-all-gold').onclick=()=>saveAllGoldLabels(10);
+
   document.getElementById('btn-back-to-task').addEventListener('click',()=>{
     setLoading(true,'Loading your tasks…');
     loadNextTask();
