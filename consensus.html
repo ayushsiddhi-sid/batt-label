@@ -767,10 +767,9 @@ async function seedConsensusQueue(){
   let _planPreview;
   try {
     const _tPrev=await labelingGet(`${SHEETS.TASKS}!A:N`);
-    const _tRowsPrev=(_tPrev.values||[]).slice(1).filter(r=>r[0]&&r[9]==='complete'||true);
     // Quick stratum count for preview
     const _prevCounts={};
-    (_tPrev.values||[]).slice(1).forEach(r=>{ if(r[0]){ const s=getStratum(r); if(s){ _prevCounts[s]=(_prevCounts[s]||0)+1; }}});
+    (_tPrev.values||[]).slice(1).forEach(r=>{ if(r[0]&&r[9]==='complete'){ const s=getStratum(r); if(s){ _prevCounts[s]=(_prevCounts[s]||0)+1; }}});
     const {plan:_pp, total:_pt}=computeSamplePlan(_prevCounts);
     _planPreview={total:_pt, strata:Object.keys(_pp).length};
   } catch(e){ _planPreview={total:'?', strata:'?'}; }
@@ -789,8 +788,8 @@ async function seedConsensusQueue(){
     const CONSENSUS_HEADERS = ['battery_id','original_label','original_sublabel','original_lfp','original_annotator',
       'original_evidence','original_evidence_url','stratum','pass1_row','assigned_to','status','assigned_at','label','sublabel','lfp',
       'evidence','evidence_url','text_logo_visible','submitted_at','time_taken_seconds',
-      'consensus_status','gold_label','gold_sublabel','gold_lfp','gold_set_by',
-      'gold_evidence','gold_evidence_url','pass1_correct','pass2_correct'];
+      'consensus_status','missing_cameras','gold_label','gold_sublabel','gold_lfp',
+      'gold_set_by','gold_evidence','gold_evidence_url','pass1_correct','pass2_correct','claimed_by'];
     const ANN_HEADERS = ['email','completed','agreements','disagreements','error_rate',
       'total_time_seconds','avg_time_seconds','last_active','total_time_hms','avg_time_mmss'];
     if(!existingSheets.has(SHEETS.CONSENSUS)){
@@ -886,7 +885,7 @@ async function seedConsensusQueue(){
           '','','','','','',   // M=label…R=text_logo_visible
           '','',               // S=submitted_at, T=time_taken
           '',                  // U=consensus_status
-          '','',''             // V=gold_label, W=gold_set_by (placeholder)
+          '','',''             // V=missing_cameras (blank), gold cols W+ left empty
         ]);
         totalNew++;
       }
@@ -898,7 +897,7 @@ async function seedConsensusQueue(){
     const BATCH=100; let written=0;
     for(let i=0;i<toWrite.length;i+=BATCH){
       setLoading(true,`Writing rows ${written+1}–${Math.min(written+BATCH,toWrite.length)} of ${toWrite.length}…`);
-      await sheetsAppend(`${SHEETS.CONSENSUS}!A:W`,toWrite.slice(i,i+BATCH));
+      await sheetsAppend(`${SHEETS.CONSENSUS}!A:AE`,toWrite.slice(i,i+BATCH));
       written+=Math.min(BATCH,toWrite.length-i);
     }
 
@@ -908,7 +907,6 @@ async function seedConsensusQueue(){
     await loadAdminDashboard();
   } catch(e){
     showToast('Seed failed: '+e.message,'error');
-    console.error(e);
     btn.disabled=false; btn.textContent='⚑ Run seed';
   }
   setLoading(false);
@@ -952,7 +950,7 @@ async function submitTask(rowIndex,fields,timeTaken){
     (task.origLfp||'').trim().toLowerCase()===(fields.lfp||'').trim().toLowerCase();
   const consensus=agree?'agree':'disagree';
 
-  // Single write — H:T (T = missing_cameras for pass-2)
+  // Single write — J:V (V = missing_cameras)
   await sheetsUpdate(`${SHEETS.CONSENSUS}!J${rowIndex}:V${rowIndex}`,[[    state.user.email,'complete','',
     fields.label,fields.sublabel||'',fields.lfp||'',
     fields.evidence,fields.evidence_url||'',
@@ -962,8 +960,7 @@ async function submitTask(rowIndex,fields,timeTaken){
   ]]);
 
   // Update annotator record — awaited so errors surface, but failure won't block
-  try { await updateAnnotatorRecord(state.user.email,consensus,timeTaken); }
-  catch(e){ console.warn('Annotator record update failed:', e.message); }
+  updateAnnotatorRecord(state.user.email,consensus,timeTaken).catch(()=>{});
 
   state.sessionCompleted++;
   if(consensus==='agree') state.sessionAgreed++;
@@ -1070,6 +1067,13 @@ async function loadAdminDashboard(){
     if(state.isReviewer && !state.isAdmin){
       document.getElementById('tab-accuracy').style.display='none';
       document.getElementById('tab-cw').style.display='none';
+      // Also hide admin-only header buttons on every dashboard load
+      ['seed-banner','btn-refresh','btn-add-tasks','btn-goto-disagree',
+       'btn-preview-reviewer','btn-back-to-task'].forEach(id=>{
+        const el=document.getElementById(id); if(el) el.style.display='none';
+      });
+      const statsGrid=document.querySelector('.stats-grid');
+      if(statsGrid) statsGrid.style.display='none';
       document.querySelector('.stats-grid').style.display='none';
       document.getElementById('seed-banner').style.display='none';
       // Switch to disagreements tab
@@ -1143,7 +1147,6 @@ async function loadAdminDashboard(){
 
   } catch(e){
     showToast('Dashboard error: '+e.message,'error');
-    console.error(e);
   }
   setLoading(false);
 }
@@ -1301,7 +1304,7 @@ function renderDisagreements(rows, p1EvidenceMap={}){
   if(state.isReviewer && !state.isAdmin){
     const myEmail = state.user.email.toLowerCase();
     const myClaimed = rows.filter(r=>r[30] && r[30].toLowerCase()===myEmail);
-    const unclaimed = rows.filter(r=>r[20]==='disagree' && (!r[30]||r[30]===''));
+    const unclaimed = rows.filter(r=>r[20]==='disagree' && (!r[30]||r[30]==='') && (!r[22]||r[22]===''));
 
     // Show claim panel if no claimed tasks
     const claimPanel = document.getElementById('claim-panel');
@@ -1436,7 +1439,6 @@ async function addSpecificTasks(){
   } catch(e){
     showToast('Error: '+e.message,'error');
     statusEl.textContent = 'Failed: '+e.message;
-    console.error(e);
   }
   setLoading(false);
 }
@@ -1701,7 +1703,7 @@ async function claimBatch(n){
     // Find unclaimed disagreement rows
     const unclaimed = rows
       .map((r,i)=>({r, idx:i+2}))
-      .filter(({r})=> r[20]==='disagree' && (!r[30]||r[30]===''));
+      .filter(({r})=> r[20]==='disagree' && (!r[30]||r[30]==='') && (!r[22]||r[22]===''));
     if(unclaimed.length === 0){
       showToast('No unclaimed tasks remaining','success');
       setLoading(false);
@@ -1896,16 +1898,13 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     const saveBtn    = document.getElementById('btn-save-all-gold');
     if(countEl)  countEl.style.display='none';
     if(saveBar)  saveBar.style.display='none';
-    // Claim next batch if requested
-    if(claimNext > 0) await claimBatch(claimNext);
-    else await loadAdminDashboard();
-
     const skipMsg = skipped > 0 ? `, ${skipped} saved to consensus only (no source row)` : '';
     showToast(`✓ Saved — ${corrected} labels corrected, ${evidenceOnly} evidence updated${skipMsg}`);
-    await loadAdminDashboard();
+    // Claim next batch or reload dashboard — but not both
+    if(claimNext > 0) await claimBatch(claimNext);
+    else await loadAdminDashboard();
   } catch(e){
     showToast('Save failed: '+e.message,'error');
-    console.error(e);
   }
   setLoading(false);
 }
@@ -1968,8 +1967,14 @@ async function signInUser(email){
     showScreen('admin');
     await loadAdminDashboard();
   } else if(state.isReviewer){
-    // Reviewer — dashboard, disagreements tab only, no export/seed
-
+    // Reviewer — show screen, hide admin-only UI before loading
+    // Hide seed banner, admin buttons, annotator-only buttons
+    const adminOnlyIds = ['seed-banner','btn-refresh','btn-add-tasks','btn-goto-disagree',
+      'btn-preview-reviewer','btn-back-to-task','btn-init-sheet'];
+    adminOnlyIds.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
+    // Hide stats grid (seeded/completed/agreement rate/flagged)
+    const statsGrid = document.querySelector('.stats-grid');
+    if(statsGrid) statsGrid.style.display='none';
     showScreen('admin');
     await loadAdminDashboard();
   } else {
@@ -2063,7 +2068,6 @@ document.addEventListener('DOMContentLoaded',()=>{
       if(stopAfter){ showScreen('goodbye'); }
       else { await loadNextTask(); }
     } catch(e){
-      console.error('Submit error:', e);
       showToast('Submit failed: ' + (e.message||'Unknown error'), 'error');
       btn.disabled=false; btn.textContent=stopAfter?'Submit & Stop':'Submit & Next →';
       _submitting=false;
@@ -2112,6 +2116,13 @@ document.addEventListener('DOMContentLoaded',()=>{
       btn.textContent = '👁 Preview as reviewer';
       btn.style.background = '';
       btn.style.borderColor = '';
+      // Restore admin-only UI
+      ['seed-banner','btn-refresh','btn-add-tasks','btn-goto-disagree',
+       'btn-preview-reviewer','btn-back-to-task'].forEach(id=>{
+        const el=document.getElementById(id); if(el) el.style.display='';
+      });
+      const statsGrid=document.querySelector('.stats-grid');
+      if(statsGrid) statsGrid.style.display='';
     }
     loadAdminDashboard();
     switchTab('disagree');
