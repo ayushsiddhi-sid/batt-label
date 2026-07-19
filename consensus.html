@@ -273,6 +273,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
       <button class="btn-secondary" id="btn-refresh">↻ Refresh</button>
       <button class="btn-secondary" id="btn-add-tasks">+ Add tasks</button>
       <button class="btn-secondary" id="btn-goto-disagree">⚑ Set gold standard</button>
+      <button class="btn-secondary" id="btn-preview-reviewer" style="border-style:dashed">👁 Preview as reviewer</button>
       <button class="btn-primary" id="btn-back-to-task" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)">← Back to tasks</button>
     </div>
   </div>
@@ -380,8 +381,6 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
         <textarea id="restore-json" style="flex:1;font-size:11px;padding:6px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:3px;height:40px;resize:none;font-family:var(--mono)" placeholder="Paste backup JSON here…"></textarea>
         <button class="btn-primary" onclick="restoreFromBackup()" style="white-space:nowrap;font-size:11px">Restore</button>
       </div>
-    </div>
-    <div style="display:none"><!-- dummy close --></div>
     </div>
     <div id="dis-list"></div>
   </div>
@@ -1198,7 +1197,7 @@ function renderCW(aRows, cRows){
   cRows.forEach(r=>{
     const p1ann = r[4];
     const p2ann = r[9];
-    if(!p1ann || r[8]!=='complete') return;
+    if(!p1ann || r[10]!=='complete') return;
     // Skip same-annotator — can't be used for accuracy
     if(p1ann && p2ann && p1ann.toLowerCase()===p2ann.toLowerCase()) return;
     if(!annStats[p1ann]) annStats[p1ann]={sampled:0,completed:0,agreed:0,disagreed:0,p1Correct:0,p1Wrong:0,p1Pending:0};
@@ -1210,7 +1209,6 @@ function renderCW(aRows, cRows){
     } else {
       annStats[p1ann].disagreed++;
       // Check if gold has been set (col Z = pass1_correct, index 25)
-      while(r.length<31) r.push('');
       if(r[28]==='Yes')       annStats[p1ann].p1Correct++;
       else if(r[28]==='No')   annStats[p1ann].p1Wrong++;
       else                    annStats[p1ann].p1Pending++;
@@ -1221,7 +1219,7 @@ function renderCW(aRows, cRows){
   // Exclude same-annotator pairs from accuracy stats
   cRows.forEach(r=>{
     const p2ann = r[9];
-    if(!p2ann || r[8]!=='complete') return;
+    if(!p2ann || r[10]!=='complete') return;
     // Skip same-annotator
     if(r[4] && p2ann && r[4].toLowerCase()===p2ann.toLowerCase()) return;
     if(!annStats[p2ann]) annStats[p2ann]={sampled:0,completed:0,agreed:0,disagreed:0,p2Correct:0,p2Wrong:0,p2Pending:0};
@@ -1229,7 +1227,6 @@ function renderCW(aRows, cRows){
     if(r[20]==='agree'){
       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
     } else {
-      while(r.length<31) r.push('');
       if(r[29]==='Yes')       annStats[p2ann].p2Correct = (annStats[p2ann].p2Correct||0) + 1;
       else if(r[29]==='No')   annStats[p2ann].p2Wrong   = (annStats[p2ann].p2Wrong||0)   + 1;
       else                    annStats[p2ann].p2Pending  = (annStats[p2ann].p2Pending||0)  + 1;
@@ -1970,7 +1967,7 @@ async function signInUser(email){
     await loadAdminDashboard();
   } else if(state.isReviewer){
     // Reviewer — dashboard, disagreements tab only, no export/seed
-    document.getElementById('btn-export').style.display='none';
+
     showScreen('admin');
     await loadAdminDashboard();
   } else {
@@ -2092,6 +2089,29 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 
   document.getElementById('btn-goto-disagree').addEventListener('click',()=>{
+    switchTab('disagree');
+  });
+
+  // Preview as reviewer toggle — lets admin test reviewer experience
+  let _previewingAsReviewer = false;
+  document.getElementById('btn-preview-reviewer').addEventListener('click',()=>{
+    _previewingAsReviewer = !_previewingAsReviewer;
+    const btn = document.getElementById('btn-preview-reviewer');
+    if(_previewingAsReviewer){
+      state._wasAdmin = state.isAdmin;
+      state.isAdmin = false;
+      state.isReviewer = true;
+      btn.textContent = '✕ Exit reviewer preview';
+      btn.style.background = 'var(--warn-dim)';
+      btn.style.borderColor = 'var(--warn)';
+    } else {
+      state.isAdmin = state._wasAdmin;
+      state.isReviewer = !!state._wasReviewer;
+      btn.textContent = '👁 Preview as reviewer';
+      btn.style.background = '';
+      btn.style.borderColor = '';
+    }
+    loadAdminDashboard();
     switchTab('disagree');
   });
   // Claim buttons
