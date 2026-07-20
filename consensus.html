@@ -272,7 +272,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
     <div class="admin-btn-row">
       <button class="btn-secondary" id="btn-refresh">↻ Refresh</button>
       <button class="btn-secondary" id="btn-add-tasks">+ Add tasks</button>
-      <button class="btn-secondary" id="btn-goto-disagree">⚑ Set gold standard</button>
+      <button class="btn-secondary" id="btn-config-sheet">⚙ Config sheet</button>
       <button class="btn-secondary" id="btn-preview-reviewer" style="border-style:dashed">👁 Preview as reviewer</button>
       <button class="btn-primary" id="btn-back-to-task" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)">← Back to tasks</button>
     </div>
@@ -2185,8 +2185,8 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
   });
 
-  document.getElementById('btn-goto-disagree').addEventListener('click',()=>{
-    switchTab('disagree');
+  document.getElementById('btn-config-sheet').addEventListener('click',()=>{
+    window.open(`https://docs.google.com/spreadsheets/d/${CONFIG_SHEET_ID}/edit`,'_blank');
   });
 
   // Preview as reviewer toggle — lets admin test reviewer experience
