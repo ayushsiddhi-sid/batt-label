@@ -361,7 +361,6 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
       <div id="unclaimed-count" style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:16px"></div>
       <div style="display:flex;gap:8px;justify-content:center">
         <button class="btn-primary" id="btn-claim-5">Claim 5 tasks</button>
-        <button class="btn-primary" id="btn-claim-10">Claim 10 tasks</button>
       </div>
     </div>
 
@@ -370,8 +369,7 @@ code{background:var(--surface2);padding:1px 5px;border-radius:2px;font-size:10px
       <span style="font-family:var(--mono);font-size:12px;color:var(--warn)" id="pending-count-bar">0 gold labels staged</span>
       <div style="display:flex;gap:8px">
         <button class="btn-secondary" id="btn-save-stop" style="font-size:12px;white-space:nowrap">↑ Save &amp; Stop</button>
-        <button class="btn-secondary" id="btn-save-claim-5" style="font-size:12px;white-space:nowrap">↑ Save &amp; Claim 5</button>
-        <button class="btn-primary" id="btn-save-all-gold" onclick="saveAllGoldLabels(0)" style="background:var(--warn);color:#0f0f0f;font-size:12px;white-space:nowrap">↑ Save &amp; Claim 10</button>
+        <button class="btn-primary" id="btn-save-all-gold" onclick="saveAllGoldLabels(0)" style="background:var(--warn);color:#0f0f0f;font-size:12px;white-space:nowrap">↑ Save &amp; Claim 5</button>
       </div>
     </div>
     <!-- Restore from backup bar -->
@@ -1081,8 +1079,8 @@ async function loadAdminDashboard(){
       document.getElementById('tab-accuracy').style.display='none';
       document.getElementById('tab-cw').style.display='none';
       // Also hide admin-only header buttons on every dashboard load
-      ['seed-banner','btn-refresh','btn-add-tasks','btn-goto-disagree',
-       'btn-preview-reviewer','btn-back-to-task'].forEach(id=>{
+      ['seed-banner','btn-refresh','btn-add-tasks',
+       'btn-config-sheet','btn-preview-reviewer','btn-back-to-task'].forEach(id=>{
         const el=document.getElementById(id); if(el) el.style.display='none';
       });
       const statsGrid=document.querySelector('.stats-grid');
@@ -2060,8 +2058,8 @@ async function signInUser(email){
   } else if(state.isReviewer){
     // Reviewer — show screen, hide admin-only UI before loading
     // Hide seed banner, admin buttons, annotator-only buttons
-    const adminOnlyIds = ['seed-banner','btn-refresh','btn-add-tasks','btn-goto-disagree',
-      'btn-preview-reviewer','btn-back-to-task','btn-init-sheet'];
+    const adminOnlyIds = ['seed-banner','btn-refresh','btn-add-tasks',
+      'btn-config-sheet','btn-preview-reviewer','btn-back-to-task','btn-init-sheet'];
     adminOnlyIds.forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; });
     // Hide stats grid (seeded/completed/agreement rate/flagged)
     const statsGrid = document.querySelector('.stats-grid');
@@ -2220,13 +2218,9 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
   // Claim buttons
   document.getElementById('btn-claim-5').addEventListener('click',()=>claimBatch(5));
-  document.getElementById('btn-claim-10').addEventListener('click',()=>claimBatch(10));
   // Save buttons
   document.getElementById('btn-save-stop').addEventListener('click',()=>saveAllGoldLabels(0));
-  document.getElementById('btn-save-claim-5').addEventListener('click',()=>saveAllGoldLabels(5));
-  // btn-save-all-gold (Save & Claim 10) already wired via onclick="saveAllGoldLabels(0)"
-  // Update its onclick to claim 10
-  document.getElementById('btn-save-all-gold').onclick=()=>saveAllGoldLabels(10);
+  document.getElementById('btn-save-all-gold').onclick=()=>saveAllGoldLabels(5);
 
   document.getElementById('btn-back-to-task').addEventListener('click',()=>{
     setLoading(true,'Loading your tasks…');
