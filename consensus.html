@@ -917,8 +917,8 @@ async function seedConsensusQueue(){
 // ═══════════════════════════════════════════════════════════════
 async function getOrAssignTask(email){
   // Read A:K to get assigned_to(J=9) and status(K=10)
-  const data = await sheetsGet(`${SHEETS.CONSENSUS}!A:K`);
-  const rows = (data.values||[]).map(r=>{ while(r.length<11) r.push(''); return r; });
+  const data = await sheetsGet(`${SHEETS.CONSENSUS}!A:L`);
+  const rows = (data.values||[]).map(r=>{ while(r.length<12) r.push(''); return r; });
   if(rows.length < 2) return {notSeeded:true};
 
   // Resume own in-progress task — assigned_to=J(9), status=K(10)
@@ -927,7 +927,20 @@ async function getOrAssignTask(email){
       return {rowIndex:i+1, batteryId:rows[i][0], origLabel:rows[i][1], origSub:rows[i][2], origLfp:rows[i][3], origAnnotator:rows[i][4], stratum:rows[i][7]};
   }
 
-  // Find next unassigned — skip tasks where this email did pass-1
+  // Release stale in-progress tasks (stuck >4 hours from abandoned sessions)
+  const STALE_MS = 4 * 60 * 60 * 1000;
+  for(let i=1;i<rows.length;i++){
+    if(rows[i][10]==='in-progress'){
+      const assignedAt = rows[i][11] ? new Date(rows[i][11]).getTime() : 0;
+      if(assignedAt && Date.now() - assignedAt > STALE_MS){
+        // Release stale task back to unassigned
+        await sheetsUpdate(`${SHEETS.CONSENSUS}!J${i+1}:L${i+1}`, [['','unassigned','']]);
+        rows[i][9]=''; rows[i][10]='unassigned'; rows[i][11]='';
+      }
+    }
+  }
+
+  // Find next unassigned
   for(let i=1;i<rows.length;i++){
     if(!rows[i][10] || rows[i][10]==='unassigned'){
       const rowNum=i+1;
@@ -1611,7 +1624,11 @@ function renderDisagreementCards(pairs){
               </div>
             </div>
           </div>
-          <button class="btn-secondary" onclick="stageGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px;margin-top:8px" id="stage-btn-${i}">✓ Stage gold</button>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <button class="btn-secondary" onclick="stageGoldLabel(${rowNum}, '${batteryId}', ${i})" style="padding:5px 14px;font-size:11px" id="stage-btn-${i}">✓ Stage gold</button>
+            <button class="btn-secondary" onclick="unstageGoldLabel(${rowNum},${i})" style="padding:5px 10px;font-size:11px;color:var(--text-muted)" title="Remove staged gold label">✕ Unstage</button>
+            <span id="stage-status-${i}" style="font-size:11px;color:var(--text-muted)"></span>
+          </div>
           <span id="stage-status-${i}" style="font-family:var(--mono);font-size:10px;color:var(--accent)"></span>
           ${goldBy?`<span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);margin-left:4px">previously saved by ${goldBy}</span>`:''}
         </div>
@@ -1695,28 +1712,34 @@ function usePassLabel(rowNum, cardIdx, pass){
   // Fill gold form using cardIdx for DOM element IDs
   const lblSel = document.getElementById('gold-lbl-'+cardIdx);
   if(lblSel){ lblSel.value = label; goldLabelChanged(cardIdx); }
+  // Use longer timeout to ensure goldLabelChanged has rendered conditional fields
   setTimeout(()=>{
     const subSel  = document.getElementById('gold-sub-'+cardIdx);
     const lfpSel  = document.getElementById('gold-lfp-'+cardIdx);
     const evEl    = document.getElementById('gold-ev-'+cardIdx);
     const evUrlEl = document.getElementById('gold-ev-url-'+cardIdx);
-    if(subSel)  subSel.value  = sub;
-    if(lfpSel){ lfpSel.value  = lfp; goldSubChanged(cardIdx); }
+    // Force sublabel visible before setting value (in case 150ms still not enough)
+    if(subSel){
+      subSel.style.display = '';
+      subSel.value = sub;
+    }
+    if(lfpSel){ lfpSel.value = lfp; goldSubChanged(cardIdx); }
     if(evEl)    evEl.value    = evidence;
     if(evUrlEl) evUrlEl.value = evUrl;
-  }, 50);
+  }, 150);
 }
 
 // ── CLAIM SYSTEM ─────────────────────────────────────────────────
-async function claimBatch(n){
+async function claimBatch(n, excludeRowNums=[]){
   setLoading(true, `Claiming ${n} tasks…`);
   try {
     const cData = await sheetsGet(`${SHEETS.CONSENSUS}!A:AE`);
     const rows = (cData.values||[]).slice(1);
-    // Find unclaimed disagreement rows
+    const excludeSet = new Set(excludeRowNums);
+    // Find unclaimed disagreement rows — exclude recently released rows from this session
     const unclaimed = rows
       .map((r,i)=>({r, idx:i+2}))
-      .filter(({r})=> r[20]==='disagree' && (!r[30]||r[30]==='') && (!r[22]||r[22]===''));
+      .filter(({r,idx})=> r[20]==='disagree' && (!r[30]||r[30]==='') && (!r[22]||r[22]==='') && !excludeSet.has(idx));
     if(unclaimed.length === 0){
       showToast('No unclaimed tasks remaining','success');
       setLoading(false);
@@ -1738,6 +1761,26 @@ async function claimBatch(n){
 
 async function saveAndClaim(claimNext){
   await saveAllGoldLabels(claimNext);
+}
+
+function unstageGoldLabel(rowNum, cardIdx){
+  if(!_pendingGold[rowNum]) return;
+  delete _pendingGold[rowNum];
+  try { localStorage.setItem('cf_pending_gold', JSON.stringify(_pendingGold)); } catch(e) {}
+  // Reset stage button
+  const btn = document.getElementById(`stage-btn-${cardIdx}`);
+  const status = document.getElementById(`stage-status-${cardIdx}`);
+  if(btn){ btn.textContent='✓ Stage gold'; btn.style.borderColor=''; btn.style.color=''; }
+  if(status){ status.textContent=''; }
+  // Update pending count
+  const count = Object.keys(_pendingGold).length;
+  const countEl    = document.getElementById('pending-count');
+  const countBarEl = document.getElementById('pending-count-bar');
+  const saveBar    = document.getElementById('save-all-bar');
+  if(countEl){ countEl.textContent=count>0?count+' staged':''; if(count===0) countEl.style.display='none'; }
+  if(countBarEl) countBarEl.textContent = count+' gold label'+(count===1?'':'s')+' staged — not yet saved';
+  if(saveBar && count===0) saveBar.style.display='none';
+  showToast('Unstaged');
 }
 
 function toggleGoldCameras(idx){
@@ -1911,11 +1954,19 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
       await new Promise(r=>setTimeout(r,500));
     }
 
-    // Clear claimed_by for saved rows — BLOCKING so dashboard reload sees updated state
+    // Clear ALL claimed rows for this reviewer — not just saved ones
+    // Track released rows so claimBatch won't immediately re-claim them
+    let allClaimed = [];
     if(state.isReviewer && !state.isAdmin){
       setLoading(true, 'Releasing claimed tasks…');
-      for(const rn of savedRowNums){
-        await sheetsUpdate(`${SHEETS.CONSENSUS}!AE${rn}`, [['']])
+      const claimData = await sheetsGet(`${SHEETS.CONSENSUS}!A:AE`);
+      const allRows = (claimData.values||[]).slice(1);
+      const myEmail = state.user.email.toLowerCase();
+      allClaimed = allRows
+        .map((r,i)=>({r, rowNum:i+2}))
+        .filter(({r})=> r[30] && r[30].toLowerCase()===myEmail);
+      for(const {rowNum} of allClaimed){
+        await sheetsUpdate(`${SHEETS.CONSENSUS}!AE${rowNum}`, [['']])
           .catch(()=>{});
         await new Promise(r=>setTimeout(r,200));
       }
@@ -1933,8 +1984,9 @@ This will update consensus_tasks and correct the tasks tab where pass-1 was wron
     showToast(`✓ Saved — ${corrected} labels corrected, ${evidenceOnly} evidence updated${skipMsg}`);
 
     // Claim next batch or reload dashboard
+    // Pass released row numbers so claimBatch won't re-claim tasks just released
     if(claimNext > 0){
-      await claimBatch(claimNext);
+      await claimBatch(claimNext, allClaimed.map(c=>c.rowNum));
     } else {
       await loadAdminDashboard();
       // For reviewers: Save & Stop — switch to disagree tab showing claim panel
